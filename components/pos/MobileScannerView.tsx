@@ -136,13 +136,28 @@ export const MobileScannerView: React.FC = () => {
             const html5QrCode = new Html5Qrcode("mobile-reader");
             scannerRef.current = html5QrCode;
 
+            // Calculamos un QR box responsivo
+            const qrboxFunction = (viewfinderWidth: number, viewfinderHeight: number) => {
+                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                return {
+                    width: Math.floor(minEdge * 0.7),
+                    height: Math.floor(minEdge * 0.7),
+                };
+            };
+
             await html5QrCode.start(
                 { facingMode: "environment" },
                 {
                     fps: 10,
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1.0,
-                    disableFlip: false,
+                    qrbox: qrboxFunction,
+                    // No seteamos aspectRatio fijo para que tome el del dispositivo
+                    // Solicitamos mayor resolución para mejorar la lectura
+                    videoConstraints: {
+                        facingMode: "environment",
+                        width: { min: 640, ideal: 1280, max: 1920 },
+                        height: { min: 480, ideal: 720, max: 1080 },
+                        aspectRatio: window.innerHeight / window.innerWidth
+                    }
                 },
                 (decodedText) => {
                     onScanSuccess(decodedText);
@@ -153,6 +168,17 @@ export const MobileScannerView: React.FC = () => {
             );
         } catch (err) {
             console.error("Error starting scanner", err);
+            // Intentar fallback básico si falla la config avanzada
+            try {
+                if(scannerRef.current) {
+                    await scannerRef.current.start(
+                        { facingMode: "environment" },
+                        { fps: 10, qrbox: 250 },
+                        (decodedText) => onScanSuccess(decodedText),
+                        () => {}
+                    );
+                }
+            } catch(e) { console.error("Fallback failed", e); }
         }
     };
 
@@ -267,6 +293,16 @@ export const MobileScannerView: React.FC = () => {
 
     return (
         <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'black', position: 'relative' }}>
+            {/* FORCE VIDEO TO FILL SCREEN - Critical Fix */}
+            <style>{`
+                #mobile-reader video {
+                    width: 100% !important;
+                    height: 100% !important;
+                    object-fit: cover !important;
+                    border-radius: 0 !important;
+                }
+            `}</style>
+
             {/* Header */}
             <div style={{ padding: '1rem', background: '#0f172a', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -281,14 +317,14 @@ export const MobileScannerView: React.FC = () => {
             {/* Scanner Area */}
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#000' }}>
                  {/* The element for Html5Qrcode to render into */}
-                <div id="mobile-reader" style={{ width: '100%', height: '100%', objectFit: 'cover' }}></div>
+                <div id="mobile-reader" style={{ width: '100%', height: '100%' }}></div>
                 
                 {/* Target Overlay (Visual Guide) */}
                 <div style={{
                     position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                    width: '250px', height: '250px',
-                    border: '2px solid rgba(255, 255, 255, 0.6)', borderRadius: '20px',
-                    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)',
+                    width: '70vw', height: '70vw', maxWidth: '300px', maxHeight: '300px',
+                    border: '2px solid rgba(255, 255, 255, 0.4)', borderRadius: '20px',
+                    boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.6)',
                     pointerEvents: 'none', zIndex: 10
                 }}>
                     <div style={{position: 'absolute', top: '-2px', left: '-2px', width: '20px', height: '20px', borderTop: '4px solid #49FFF5', borderLeft: '4px solid #49FFF5', borderRadius: '4px 0 0 0'}}></div>
