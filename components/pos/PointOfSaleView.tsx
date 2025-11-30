@@ -65,14 +65,45 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         }
     }, [carts]);
 
+    // Broadcast Carts to Mobile Devices whenever carts change
+    useEffect(() => {
+        const channel = supabase.channel('pos-scans');
+        
+        // Broadcast immediately when carts update
+        const payload = { 
+            carts: carts.map(c => ({ id: c.id, name: c.name })) 
+        };
+        
+        channel.send({
+            type: 'broadcast',
+            event: 'cart-sync',
+            payload: payload
+        }).catch(err => console.error("Error syncing carts", err));
+
+    }, [carts]);
+
     // Realtime Scanner Listener - STABLE CONNECTION (Run Once)
     useEffect(() => {
         console.log("Suscribiendo a canal POS...");
         const channel = supabase.channel('pos-scans')
             .on('broadcast', { event: 'remote-scan' }, (payload) => {
                 if (payload.payload && payload.payload.code) {
-                    handleRemoteScanReceived(payload.payload.code, payload.payload.device);
+                    handleRemoteScanReceived(
+                        payload.payload.code, 
+                        payload.payload.device,
+                        payload.payload.quantity || 1,
+                        payload.payload.cartId
+                    );
                 }
+            })
+            .on('broadcast', { event: 'request-carts' }, () => {
+                // Mobile device requested carts, send current list
+                const currentCarts = stateRef.current.carts;
+                channel.send({
+                    type: 'broadcast',
+                    event: 'cart-sync',
+                    payload: { carts: currentCarts.map(c => ({ id: c.id, name: c.name })) }
+                });
             })
             .subscribe((status) => {
                 if (status === 'SUBSCRIBED') console.log("POS conectado a escáneres remotos");
@@ -84,7 +115,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         };
     }, []);
 
-    const handleRemoteScanReceived = (code: string, deviceName: string) => {
+    const handleRemoteScanReceived = (code: string, deviceName: string, quantity: number = 1, targetCartId?: string) => {
         // Special Test Code
         if (code === 'CONNECTION_TEST') {
             showNotification('info', 'Conexión Exitosa', `Dispositivo "${deviceName}" conectado correctamente.`);
@@ -104,9 +135,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         }
 
         if (product) {
-            // Add to cart using the stable ref to find active cart ID
-            addToCartWithRef(product);
-            showNotification('success', 'Producto Agregado', `${product.name} (x1)`);
+            // Add to specific cart or active cart
+            addToCartWithRef(product, quantity, targetCartId);
+            
+            // Notification logic
+            const { carts } = stateRef.current;
+            const targetCartName = carts.find(c => c.id === targetCartId)?.name || 'Carrito Activo';
+            
+            showNotification('success', 'Producto Recibido', `${product.name} (x${quantity}) → ${targetCartName}`);
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); // Success beep
             audio.play().catch(() => {});
         } else {
@@ -154,13 +190,17 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     };
 
     // Helper to add to cart using Ref state (for remote calls)
-    const addToCartWithRef = (product: Product, quantity = 1) => {
-        const { activeCartId: currentCartId } = stateRef.current;
-        if (!currentCartId) return;
+    const addToCartWithRef = (product: Product, quantity = 1, targetCartId?: string) => {
+        const { activeCartId: currentActiveId, carts: currentCarts } = stateRef.current;
+        
+        // Use targetCartId if provided, otherwise activeCartId, otherwise first cart
+        const destCartId = targetCartId || currentActiveId || (currentCarts.length > 0 ? currentCarts[0].id : null);
+        
+        if (!destCartId) return;
 
         setCarts(prev => {
             return prev.map(cart => {
-                if (cart.id === currentCartId) {
+                if (cart.id === destCartId) {
                     const currentItems = cart.items || [];
                     const existing = currentItems.find(i => i.productId === product.id);
                     
@@ -186,7 +226,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     // Standard add to cart (UI triggered)
     const addToCart = (product: Product, quantity = 1) => {
         if (!activeCartId) return;
-        addToCartWithRef(product, quantity);
+        addToCartWithRef(product, quantity, activeCartId);
     };
 
     const handleLocalScan = (decodedText: string) => {
