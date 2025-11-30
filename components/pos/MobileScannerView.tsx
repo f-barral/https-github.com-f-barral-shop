@@ -92,11 +92,16 @@ export const MobileScannerView: React.FC = () => {
             .on('broadcast', { event: 'cart-sync' }, (payload) => {
                 if (payload.payload && payload.payload.carts) {
                     const carts = payload.payload.carts as RemoteCart[];
+                    console.log("Carritos recibidos:", carts);
                     setAvailableCarts(carts);
-                    // Select first if none selected, or if selected one is gone
+                    
+                    // Auto-select logic
                     setSelectedCartId(prev => {
+                        // If we already have a selection and it still exists, keep it
                         const exists = carts.find(c => c.id === prev);
-                        return exists ? prev : (carts.length > 0 ? carts[0].id : '');
+                        if (exists) return prev;
+                        // Otherwise pick the first one
+                        return carts.length > 0 ? carts[0].id : '';
                     });
                 }
             })
@@ -105,7 +110,9 @@ export const MobileScannerView: React.FC = () => {
                 if (status === 'SUBSCRIBED') {
                     setConnectionState('connected');
                     // Request carts on connection
-                    channel.send({ type: 'broadcast', event: 'request-carts', payload: {} });
+                    setTimeout(() => {
+                        channel.send({ type: 'broadcast', event: 'request-carts', payload: {} });
+                    }, 500);
                 } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                     setConnectionState('disconnected');
                 }
@@ -116,6 +123,20 @@ export const MobileScannerView: React.FC = () => {
 
     const handleReconnect = () => {
         connectToChannel();
+    };
+
+    const handleRefreshCarts = () => {
+        if (channelRef.current && connectionState === 'connected') {
+            channelRef.current.send({ type: 'broadcast', event: 'request-carts', payload: {} });
+            // Feedback visual simple
+            const btn = document.getElementById('refresh-btn');
+            if(btn) {
+                btn.style.transform = 'rotate(180deg)';
+                setTimeout(() => btn.style.transform = 'rotate(0deg)', 300);
+            }
+        } else {
+            handleReconnect();
+        }
     };
 
     const checkIdentity = async () => {
@@ -240,11 +261,12 @@ export const MobileScannerView: React.FC = () => {
         setScanStatus('sending');
 
         try {
+            // Send payload. If selectedCartId is empty string, send null so PC uses active cart.
             const payload = { 
                 code: code, 
                 device: device?.name || 'Móvil',
                 quantity: qty,
-                cartId: selectedCartId
+                cartId: selectedCartId || null 
             };
             
             // Auto-reconnect check
@@ -362,7 +384,7 @@ export const MobileScannerView: React.FC = () => {
 
             {/* Header with Cart Selector */}
             <div style={{ padding: '0.75rem', background: '#0f172a', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, overflow: 'hidden' }}>
                     <div style={{ width: '8px', height: '8px', background: connectionState === 'connected' ? '#10b981' : '#f59e0b', borderRadius: '50%', flexShrink: 0 }}></div>
                     <select 
                         value={selectedCartId} 
@@ -370,12 +392,19 @@ export const MobileScannerView: React.FC = () => {
                         style={{
                             background: '#1e293b', border: '1px solid #334155', color: 'white',
                             padding: '0.4rem', borderRadius: '0.5rem', fontSize: '0.9rem',
-                            maxWidth: '180px'
+                            maxWidth: '180px', flex: 1
                         }}
                     >
-                        {availableCarts.length === 0 && <option value="">Sin Carritos</option>}
+                        {availableCarts.length === 0 && <option value="">Sin Carritos Detectados</option>}
                         {availableCarts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
+                    <button 
+                        id="refresh-btn"
+                        onClick={handleRefreshCarts}
+                        style={{background: 'transparent', border: 'none', color: '#94a3b8', transition: 'transform 0.3s', cursor: 'pointer', padding: '0 5px'}}
+                    >
+                        <i className="fa-solid fa-rotate"></i>
+                    </button>
                 </div>
                 <div>
                      {connectionState === 'disconnected' && (
@@ -511,6 +540,7 @@ export const MobileScannerView: React.FC = () => {
                                 onChange={e => setSelectedCartId(e.target.value)}
                                 style={{width: '100%', padding: '0.8rem', borderRadius: '0.5rem', border: '1px solid #cbd5e1', fontSize: '1rem', background: 'white'}}
                             >
+                                <option value="">Mostrador / Activo (Automático)</option>
                                 {availableCarts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                         </div>

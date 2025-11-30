@@ -98,6 +98,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
             })
             .on('broadcast', { event: 'request-carts' }, () => {
                 // Mobile device requested carts, send current list
+                console.log("Solicitud de carritos recibida");
                 const currentCarts = stateRef.current.carts;
                 channel.send({
                     type: 'broadcast',
@@ -115,7 +116,7 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         };
     }, []);
 
-    const handleRemoteScanReceived = (code: string, deviceName: string, quantity: number = 1, targetCartId?: string) => {
+    const handleRemoteScanReceived = (code: string, deviceName: string, quantity: number = 1, targetCartId?: string | null) => {
         // Special Test Code
         if (code === 'CONNECTION_TEST') {
             showNotification('info', 'Conexión Exitosa', `Dispositivo "${deviceName}" conectado correctamente.`);
@@ -135,12 +136,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         }
 
         if (product) {
-            // Add to specific cart or active cart
-            addToCartWithRef(product, quantity, targetCartId);
+            // Add to specific cart or active cart (Ref-safe)
+            const resolvedCartId = addToCartWithRef(product, quantity, targetCartId);
             
             // Notification logic
             const { carts } = stateRef.current;
-            const targetCartName = carts.find(c => c.id === targetCartId)?.name || 'Carrito Activo';
+            const targetCartName = carts.find(c => c.id === resolvedCartId)?.name || 'Carrito Activo';
             
             showNotification('success', 'Producto Recibido', `${product.name} (x${quantity}) → ${targetCartName}`);
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); // Success beep
@@ -190,13 +191,16 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     };
 
     // Helper to add to cart using Ref state (for remote calls)
-    const addToCartWithRef = (product: Product, quantity = 1, targetCartId?: string) => {
+    // Returns the ID of the cart where items were added
+    const addToCartWithRef = (product: Product, quantity = 1, targetCartId?: string | null) => {
         const { activeCartId: currentActiveId, carts: currentCarts } = stateRef.current;
         
-        // Use targetCartId if provided, otherwise activeCartId, otherwise first cart
-        const destCartId = targetCartId || currentActiveId || (currentCarts.length > 0 ? currentCarts[0].id : null);
+        // Use targetCartId if provided and valid string, otherwise activeCartId, otherwise first cart
+        const destCartId = (targetCartId && targetCartId.trim() !== "") 
+            ? targetCartId 
+            : (currentActiveId || (currentCarts.length > 0 ? currentCarts[0].id : null));
         
-        if (!destCartId) return;
+        if (!destCartId) return null;
 
         setCarts(prev => {
             return prev.map(cart => {
@@ -221,6 +225,8 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
                 return cart;
             });
         });
+        
+        return destCartId;
     };
 
     // Standard add to cart (UI triggered)
