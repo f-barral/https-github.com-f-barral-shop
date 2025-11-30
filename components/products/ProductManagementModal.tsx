@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Product, Supplier } from '../../types';
@@ -33,6 +32,9 @@ export const ProductManagementModal: React.FC<ProductFormModalProps> = ({ onClos
     const [images, setImages] = useState<string[]>([]);
     const [supplierCodes, setSupplierCodes] = useState<SupplierCodeItem[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    
+    // State for QR Zoom
+    const [showFullQR, setShowFullQR] = useState(false);
 
     const populateForm = useCallback(() => {
         if (productToEdit) {
@@ -142,6 +144,48 @@ export const ProductManagementModal: React.FC<ProductFormModalProps> = ({ onClos
     return (
         <div className={`modal-overlay ${isStacked ? 'stacked' : ''}`} onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()}>
+                
+                {/* QR ZOOM OVERLAY */}
+                {showFullQR && (
+                    <div 
+                        style={{
+                            position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.95)',
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                            animation: 'fadeIn 0.2s', backdropFilter: 'blur(5px)'
+                        }} 
+                        onClick={() => setShowFullQR(false)}
+                    >
+                        <div 
+                            style={{
+                                background: 'white', padding: '2rem', borderRadius: '1.5rem', 
+                                textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center',
+                                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', maxWidth: '90%', border: '4px solid var(--bg-gradient-cyan)'
+                            }}
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <h2 style={{margin: '0 0 1.5rem', fontSize: '1.5rem', color: '#1e3a8a'}}>{name}</h2>
+                            <div style={{background: 'white', padding: '1rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0'}}>
+                                <QRCodeCanvas
+                                    value={productToEdit?.id || ''}
+                                    size={300}
+                                    level={"H"}
+                                    includeMargin={true}
+                                />
+                            </div>
+                            <p style={{marginTop: '1.5rem', color: '#64748b', fontSize: '1.1rem', fontWeight: 600, fontFamily: 'monospace'}}>
+                                ID: {productToEdit?.id.split('-')[0]}...
+                            </p>
+                            <button 
+                                className="btn btn-primary" 
+                                onClick={() => setShowFullQR(false)}
+                                style={{marginTop: '1.5rem', width: '100%', justifyContent: 'center'}}
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div className="modal-header">
                     <div>
                         <h2>{title}</h2>
@@ -204,16 +248,41 @@ export const ProductManagementModal: React.FC<ProductFormModalProps> = ({ onClos
                                         <i className="fa-solid fa-qrcode" style={{marginRight: '6px', color: 'var(--text-main)'}}></i> Código QR para Caja (POS)
                                     </span>
                                     <div style={{display: 'flex', gap: '1.5rem', alignItems: 'center'}}>
-                                        <div style={{background: 'white', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)'}}>
+                                        <div 
+                                            onClick={() => setShowFullQR(true)}
+                                            style={{
+                                                background: 'white', padding: '0.75rem', borderRadius: '0.5rem', 
+                                                border: '1px solid var(--border-color)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                                                cursor: 'pointer', position: 'relative', transition: 'transform 0.2s, border-color 0.2s'
+                                            }}
+                                            onMouseEnter={e => {
+                                                e.currentTarget.style.transform = 'scale(1.05)';
+                                                e.currentTarget.style.borderColor = 'var(--accent-color)';
+                                            }}
+                                            onMouseLeave={e => {
+                                                e.currentTarget.style.transform = 'scale(1)';
+                                                e.currentTarget.style.borderColor = 'var(--border-color)';
+                                            }}
+                                            title="Click para agrandar"
+                                        >
                                              <QRCodeCanvas
                                                 value={productToEdit?.id || ''}
                                                 size={100}
                                                 level={"H"}
                                                 includeMargin={false}
                                             />
+                                            <div style={{
+                                                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                background: 'rgba(0,0,0,0.03)', opacity: 0, transition: 'opacity 0.2s'
+                                            }} onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0'}>
+                                                <i className="fa-solid fa-maximize" style={{color: 'var(--accent-color)', fontSize: '1.5rem', textShadow: '0 2px 4px white'}}></i>
+                                            </div>
                                         </div>
                                         <div style={{fontSize: '0.9rem', color: 'var(--text-secondary)'}}>
                                             <p style={{margin: '0 0 0.5rem', lineHeight: '1.4'}}>Escanea este código desde el módulo de <strong>Caja</strong> para agregar el producto a la venta rápidamente.</p>
+                                            <button className="btn btn-sm btn-secondary" onClick={() => setShowFullQR(true)} style={{fontSize: '0.75rem'}}>
+                                                <i className="fa-solid fa-maximize" style={{marginRight: '5px'}}></i> Agrandar
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
