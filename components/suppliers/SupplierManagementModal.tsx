@@ -1,6 +1,5 @@
 
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Supplier } from '../../types';
 import { REPUTATION_LEVELS } from '../../utils/formatters';
@@ -15,6 +14,7 @@ interface SupplierFormModalProps {
 }
 
 export const SupplierManagementModal: React.FC<SupplierFormModalProps> = ({ onClose, onSuccess, supplierToEdit, initialData, isStacked = false }) => {
+    
     const [mode, setMode] = useState<'view' | 'edit'>((supplierToEdit && !initialData) ? 'view' : 'edit');
     const [isSaving, setIsSaving] = useState(false);
 
@@ -33,6 +33,17 @@ export const SupplierManagementModal: React.FC<SupplierFormModalProps> = ({ onCl
     const [taxId, setTaxId] = useState('');
     const [grossIncome, setGrossIncome] = useState('');
     const [taxRegime, setTaxRegime] = useState<'Responsable Inscripto' | 'Monotributista' | 'Proveedor del exterior' | 'Exento'>('Responsable Inscripto');
+
+    // Ref for Google Map
+    const mapRef = useRef<HTMLDivElement>(null);
+    
+    // Autocomplete State
+    const [suggestions, setSuggestions] = useState<any[]>([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const autocompleteService = useRef<any>(null);
+    
+    // State to track Google Maps API errors (e.g. RefererNotAllowed)
+    const [mapError, setMapError] = useState<string | null>(null);
 
     const populateForm = useCallback(() => {
         if (supplierToEdit) {
@@ -87,6 +98,161 @@ export const SupplierManagementModal: React.FC<SupplierFormModalProps> = ({ onCl
 
     useEffect(() => { populateForm(); }, [populateForm]);
 
+    // Global Google Auth Failure Handler
+    useEffect(() => {
+        const originalAuthFailure = (window as any).gm_authFailure;
+        (window as any).gm_authFailure = () => {
+            console.error("Google Maps API Authentication Failure");
+            setMapError("Acceso denegado a Google Maps. Verifique restricciones de dominio (Referer) en la API Key.");
+            if (originalAuthFailure) originalAuthFailure();
+        };
+
+        return () => {
+            (window as any).gm_authFailure = originalAuthFailure;
+        };
+    }, []);
+
+    // 1. Google Maps View Integration Effect (VIEW MODE)
+    useEffect(() => {
+        let isMounted = true;
+
+        const initMap = async () => {
+            if (mode !== 'view') return;
+            if (mapError) return;
+
+            const fullAddress = [address, city, province, country].filter(Boolean).join(', ');
+            
+            if (!fullAddress) return;
+            if (!mapRef.current) return;
+
+            try {
+                if (!(window as any).google || !(window as any).google.maps) return;
+
+                const { Geocoder } = await (window as any).google.maps.importLibrary("geocoding");
+                const { Map } = await (window as any).google.maps.importLibrary("maps");
+                const { AdvancedMarkerElement } = await (window as any).google.maps.importLibrary("marker");
+
+                if (!isMounted) return;
+
+                const geocoder = new Geocoder();
+
+                geocoder.geocode({ address: fullAddress }, (results: any, status: any) => {
+                    if (!isMounted) return;
+                    
+                    if (status === 'OK' && results[0] && mapRef.current) {
+                        const map = new Map(mapRef.current, {
+                            center: results[0].geometry.location,
+                            zoom: 15,
+                            disableDefaultUI: true,
+                            zoomControl: true,
+                            mapTypeControl: false,
+                            streetViewControl: false,
+                            mapId: 'DEMO_MAP_ID',
+                        });
+                        
+                        new AdvancedMarkerElement({
+                            map: map,
+                            position: results[0].geometry.location,
+                        });
+                    } else {
+                        console.warn('Geocode was not successful: ' + status);
+                        if (status === 'REQUEST_DENIED' || status === 'ERROR') {
+                            setMapError(`Error de Mapa: ${status}`);
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error("Error loading Google Maps libraries:", e);
+                setMapError("Error cargando librerías de Google Maps");
+            }
+        };
+
+        initMap();
+
+        return () => { isMounted = false; };
+    }, [mode, address, city, province, country, mapError]);
+
+    // 2. Custom Places Autocomplete Service (EDIT MODE) - Replaces Widget
+    useEffect(() => {
+        if (mode === 'edit' && !autocompleteService.current) {
+            const initService = async () => {
+                 if (!(window as any).google) return;
+                 try {
+                     const { AutocompleteService } = await (window as any).google.maps.importLibrary("places");
+                     autocompleteService.current = new AutocompleteService();
+                 } catch (e) {
+                     console.error("Error loading Places lib", e);
+                 }
+            };
+            initService();
+        }
+    }, [mode]);
+
+    const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setAddress(val);
+        setMapError(null);
+
+        if (!val || val.length < 3) {
+            setSuggestions([]);
+            setShowSuggestions(false);
+            return;
+        }
+
+        if (autocompleteService.current) {
+            autocompleteService.current.getPlacePredictions({ input: val }, (predictions: any[], status: any) => {
+                if (status === 'OK' && predictions) {
+                    setSuggestions(predictions);
+                    setShowSuggestions(true);
+                } else if (status === 'REQUEST_DENIED' || status.includes('ERROR')) {
+                     // Specific error handling for permissions
+                     setMapError(`API Bloqueada (${status}). Habilite 'Places API' y 'Maps JavaScript API' en Google Cloud Console.`);
+                     setSuggestions([]);
+                } else {
+                    setSuggestions([]);
+                }
+            });
+        }
+    };
+
+    const handleSelectSuggestion = async (placeId: string, description: string) => {
+        setAddress(description);
+        setShowSuggestions(false);
+        setSuggestions([]);
+
+        try {
+             const { Geocoder } = await (window as any).google.maps.importLibrary("geocoding");
+             const geocoder = new Geocoder();
+             
+             geocoder.geocode({ placeId: placeId }, (results: any, status: any) => {
+                 if (status === 'OK' && results[0]) {
+                     const comps = results[0].address_components;
+                     // Update with formatted address if available for better precision
+                     if (results[0].formatted_address) {
+                        setAddress(results[0].formatted_address);
+                     }
+
+                     let newCity = '';
+                     let newProvince = '';
+                     let newCountry = '';
+
+                     for (const component of comps) {
+                        const type = component.types[0];
+                        if (type === "locality") newCity = component.long_name;
+                        if (type === "administrative_area_level_2" && !newCity) newCity = component.long_name;
+                        if (type === "administrative_area_level_1") newProvince = component.long_name;
+                        if (type === "country") newCountry = component.long_name;
+                    }
+                    if (newCity) setCity(newCity);
+                    if (newProvince) setProvince(newProvince);
+                    if (newCountry) setCountry(newCountry);
+                 }
+             });
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name) return;
@@ -133,98 +299,182 @@ export const SupplierManagementModal: React.FC<SupplierFormModalProps> = ({ onCl
     return (
         <div className={`modal-overlay ${isStacked ? 'stacked' : ''}`} onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()}>
-                <div className="modal-header">
-                    <div>
-                        <h2>{title}</h2>
-                        {initialData && <span className="ai-badge"><i className="fa-solid fa-wand-magic-sparkles"></i> Autocompletado por IA</span>}
-                        {supplierToEdit && <span className="modal-subtitle">ID Sistema: V-{supplierToEdit.supplier_code}</span>}
+                {/* Custom Header for View Mode is hidden, we build a custom one inside the view */}
+                {mode !== 'view' && (
+                    <div className="modal-header">
+                        <div>
+                            <h2>{title}</h2>
+                            {initialData && <span className="ai-badge"><i className="fa-solid fa-wand-magic-sparkles"></i> Autocompletado por IA</span>}
+                            {supplierToEdit && <span className="modal-subtitle">ID Sistema: V-{supplierToEdit.supplier_code}</span>}
+                        </div>
+                        <button onClick={onClose} className="close-btn"><i className="fa-solid fa-xmark"></i></button>
                     </div>
-                    <button onClick={onClose} className="close-btn"><i className="fa-solid fa-xmark"></i></button>
-                </div>
+                )}
 
                 {mode === 'view' ? (
-                    <div className="modal-form" style={{background: '#f8fafc'}}>
-                        <div className="modal-body-layout single-column">
+                    <div className="modal-form" style={{background: '#f1f5f9', display: 'flex', flexDirection: 'column', height: '100%'}}>
+                        {/* Close Button Overlay */}
+                         <button onClick={onClose} className="close-btn" style={{position: 'absolute', top: '1.5rem', right: '1.5rem', zIndex: 50, background: 'rgba(255,255,255,0.5)', color: 'var(--text-main)', border: 'none', backdropFilter: 'blur(4px)'}}>
+                            <i className="fa-solid fa-xmark"></i>
+                        </button>
+
+                        <div className="modal-body-layout single-column" style={{padding: 0, gap: 0, display: 'block', overflowY: 'auto'}}>
                             
-                            {/* Header Card */}
-                            <div style={{background: 'white', borderRadius: 'var(--radius-lg)', padding: '2rem', boxShadow: 'var(--shadow-sm)', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid white'}}>
-                                <div>
-                                    <h1 style={{margin: '0 0 0.75rem', fontSize: '1.8rem', color: 'var(--text-main)', letterSpacing: '-0.02em'}}>{name}</h1>
-                                    <div style={{display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap'}}>
-                                        <div className={`status-badge status-${status.toLowerCase()}`}>{status}</div>
-                                        <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem', background: '#f1f5f9', padding: '0.4rem 1rem', borderRadius: '99px'}}>
-                                            <ReputationStars level={reputation} />
-                                            <span style={{fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)'}}>{REPUTATION_LEVELS[reputation].label}</span>
+                            {/* Banner / Hero Section */}
+                            <div style={{
+                                background: 'linear-gradient(135deg, #6ee7b7 0%, var(--bg-gradient-cyan) 100%)',
+                                padding: '3rem 2.5rem 6rem 2.5rem',
+                                color: 'var(--text-main)',
+                                position: 'relative'
+                            }}>
+                                <div style={{position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundImage: 'radial-gradient(rgba(0,0,0,0.05) 1px, transparent 1px)', backgroundSize: '20px 20px', opacity: 1}}></div>
+                                <div style={{position: 'relative', zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
+                                    <div>
+                                        <div style={{display: 'flex', gap: '0.75rem', marginBottom: '0.5rem'}}>
+                                            <span className={`status-badge status-${status.toLowerCase()}`} style={{border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.1)'}}>{status}</span>
+                                            <div style={{display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(255,255,255,0.6)', padding: '0.2rem 0.8rem', borderRadius: '99px', fontSize: '0.8rem', backdropFilter: 'blur(4px)', border: '1px solid rgba(0,0,0,0.05)'}}>
+                                                <span style={{color: '#d97706'}}>★</span>
+                                                <span style={{fontWeight: 600, color: 'var(--text-main)'}}>{REPUTATION_LEVELS[reputation].label}</span>
+                                            </div>
                                         </div>
-                                    </div>
-                                </div>
-                                <div style={{width: '72px', height: '72px', background: 'var(--bg-gradient-blue)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '2rem', boxShadow: '0 10px 15px -3px rgba(30, 58, 138, 0.2)'}}>
-                                    <i className="fa-solid fa-building"></i>
-                                </div>
-                            </div>
-
-                            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.5rem'}}>
-                                
-                                {/* Fiscal Data Card */}
-                                <div style={{background: 'white', borderRadius: 'var(--radius-lg)', padding: '2rem', boxShadow: 'var(--shadow-sm)', border: '1px solid white'}}>
-                                    <h4 style={{margin: '0 0 1.5rem', fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.1em', fontWeight: 700}}><i className="fa-solid fa-file-invoice-dollar" style={{marginRight: '0.5rem'}}></i> Datos Fiscales</h4>
-                                    
-                                    <div style={{display: 'grid', gap: '1.5rem'}}>
-                                        <div>
-                                            <span className="detail-label">CUIT</span>
-                                            <div className="detail-value" style={{fontFamily: 'monospace', fontSize: '1.1rem', marginTop: '0.25rem'}}>{taxId || '-'}</div>
-                                        </div>
-                                        <div>
-                                            <span className="detail-label">Ingresos Brutos</span>
-                                            <div className="detail-value" style={{marginTop: '0.25rem'}}>{grossIncome || '-'}</div>
-                                        </div>
-                                        <div>
-                                            <span className="detail-label">Condición IVA</span>
-                                            <div className="detail-value" style={{marginTop: '0.25rem'}}>{taxRegime || '-'}</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Location & Contact Card */}
-                                <div style={{background: 'white', borderRadius: 'var(--radius-lg)', padding: '2rem', boxShadow: 'var(--shadow-sm)', border: '1px solid white'}}>
-                                    <h4 style={{margin: '0 0 1.5rem', fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.1em', fontWeight: 700}}><i className="fa-solid fa-location-dot" style={{marginRight: '0.5rem'}}></i> Ubicación y Contacto</h4>
-                                    
-                                    <div className="detail-group">
-                                        <span className="detail-label">Dirección</span>
-                                        <div className="detail-value" style={{fontSize: '1rem'}}>{address || '-'}</div>
-                                    </div>
-                                    <div className="detail-group">
-                                        <span className="detail-label">Ciudad / País</span>
-                                        <div className="detail-value" style={{fontSize: '1rem'}}>{[city, province, country].filter(Boolean).join(', ') || '-'}</div>
-                                    </div>
-                                    <div className="detail-group">
-                                        <span className="detail-label">Teléfono</span>
-                                        <div className="detail-value" style={{fontSize: '1rem'}}>
-                                            {fullPhoneNumber ? (
-                                                <span style={{fontFamily: 'monospace'}}>
-                                                    {fullPhoneNumber}
-                                                </span>
-                                            ) : '-'}
-                                        </div>
-                                    </div>
-                                    <div className="detail-group" style={{marginBottom: 0}}>
-                                        <span className="detail-label">Sitio Web</span>
-                                        <div className="detail-value">
-                                            {website ? (
-                                                <a href={website} target="_blank" rel="noopener noreferrer" style={{color: 'var(--accent-color)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', padding: '0.5rem 1rem', background: '#ecfeff', borderRadius: '8px', textDecoration: 'none'}}>
-                                                    <i className="fa-solid fa-arrow-up-right-from-square" style={{marginRight: '8px'}}></i>
-                                                    {website.replace(/^https?:\/\//, '')}
-                                                </a>
-                                            ) : <span style={{color: 'var(--text-muted)'}}>-</span>}
+                                        <h1 style={{margin: 0, fontSize: '2rem', fontWeight: 800}}>{name}</h1>
+                                        <div style={{opacity: 0.8, marginTop: '0.25rem', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                                            <i className="fa-solid fa-fingerprint"></i> ID: V-{supplierToEdit?.supplier_code}
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                        </div>
-                        <div className="modal-footer" style={{background: 'white'}}>
-                            <button type="button" className="btn btn-secondary" onClick={onClose}>Cerrar</button>
-                            <button type="button" className="btn btn-primary" onClick={() => setMode('edit')}><i className="fa-solid fa-pen-to-square"></i> Editar</button>
+                            {/* Main Content Card - Overlapping Banner */}
+                            <div style={{
+                                margin: '-4rem 2.5rem 2.5rem 2.5rem',
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 320px',
+                                gap: '1.5rem',
+                                position: 'relative',
+                                zIndex: 20
+                            }}>
+                                {/* Left Column: Contact & Location */}
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '1.5rem'}}>
+                                    {/* Icon Avatar */}
+                                    <div style={{
+                                        width: '80px', height: '80px', 
+                                        background: 'white', borderRadius: '1rem', 
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '2.5rem', color: 'var(--bg-gradient-blue)',
+                                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                                        border: '1px solid #e2e8f0',
+                                        marginTop: '-1rem'
+                                    }}>
+                                        <i className="fa-solid fa-building"></i>
+                                    </div>
+
+                                    {/* Contact Card */}
+                                    <div style={{background: 'white', borderRadius: '1rem', padding: '1.5rem', boxShadow: 'var(--shadow-sm)', border: '1px solid #e2e8f0'}}>
+                                        <h4 style={{margin: '0 0 1.25rem', fontSize: '0.9rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', fontWeight: 700}}>Información de Contacto</h4>
+                                        
+                                        <div style={{display: 'flex', flexDirection: 'column', gap: '1.25rem'}}>
+                                            <div className="detail-group">
+                                                <span className="detail-label"><i className="fa-solid fa-phone" style={{marginRight: '6px'}}></i> Teléfono</span>
+                                                <div className="detail-value" style={{fontSize: '1rem', fontFamily: 'monospace'}}>
+                                                    {fullPhoneNumber || <span style={{color: 'var(--text-muted)'}}>-</span>}
+                                                </div>
+                                            </div>
+                                            <div className="detail-group">
+                                                <span className="detail-label"><i className="fa-solid fa-globe" style={{marginRight: '6px'}}></i> Sitio Web</span>
+                                                <div className="detail-value">
+                                                    {website ? (
+                                                        <a href={website} target="_blank" rel="noopener noreferrer" style={{color: 'var(--accent-color)', fontWeight: 600, textDecoration: 'none'}}>
+                                                            {website.replace(/^https?:\/\//, '')}
+                                                        </a>
+                                                    ) : <span style={{color: 'var(--text-muted)'}}>-</span>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Location Map */}
+                                    <div style={{background: 'white', borderRadius: '1rem', overflow: 'hidden', boxShadow: 'var(--shadow-sm)', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column'}}>
+                                        {/* Google Map Container */}
+                                        <div 
+                                            style={{height: '250px', width: '100%', background: '#f1f5f9', position: 'relative'}}
+                                        >
+                                            {mapError ? (
+                                                <div style={{position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--error-color)', padding: '1rem', textAlign: 'center'}}>
+                                                     <i className="fa-solid fa-triangle-exclamation" style={{fontSize: '2rem', marginBottom: '0.5rem'}}></i>
+                                                     <span style={{fontWeight: 700}}>Mapa no disponible</span>
+                                                     <span style={{fontSize: '0.8rem', marginTop: '0.25rem', color: 'var(--text-secondary)'}}>{mapError}</span>
+                                                </div>
+                                            ) : (
+                                                <div ref={mapRef} style={{width: '100%', height: '100%'}}></div>
+                                            )}
+                                            
+                                            {!address && !mapError && (
+                                                <div style={{position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', flexDirection: 'column', background: '#f1f5f9'}}>
+                                                     <i className="fa-solid fa-map-location-dot" style={{fontSize: '2rem', marginBottom: '0.5rem'}}></i>
+                                                     <span>Sin dirección para mostrar</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        <div style={{padding: '1.25rem'}}>
+                                            <h4 style={{margin: '0 0 0.5rem', fontSize: '0.9rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', fontWeight: 700}}>Ubicación</h4>
+                                            <p style={{margin: 0, fontSize: '1.05rem', fontWeight: 500, color: 'var(--text-main)'}}>{address || 'Sin dirección registrada'}</p>
+                                            <p style={{margin: '0.25rem 0 0', fontSize: '0.9rem', color: 'var(--text-secondary)'}}>
+                                                {[city, province, country].filter(Boolean).join(', ')}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right Column: Fiscal & Stats */}
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
+                                    {/* Fiscal Card */}
+                                    <div style={{background: 'white', borderRadius: '1rem', padding: '1.5rem', boxShadow: 'var(--shadow-sm)', border: '1px solid #e2e8f0', height: 'fit-content'}}>
+                                        <h4 style={{margin: '0 0 1.25rem', fontSize: '0.9rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', fontWeight: 700}}>
+                                            <i className="fa-solid fa-scale-balanced" style={{marginRight: '8px'}}></i> Datos Fiscales
+                                        </h4>
+                                        
+                                        <div style={{display: 'flex', flexDirection: 'column', gap: '1.25rem'}}>
+                                            <div>
+                                                <span className="detail-label">CUIT</span>
+                                                <div style={{fontFamily: 'monospace', fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-main)', marginTop: '0.25rem'}}>
+                                                    {taxId || '-'}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span className="detail-label">Condición IVA</span>
+                                                <div style={{fontSize: '0.95rem', fontWeight: 500}}>
+                                                    {taxRegime || '-'}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span className="detail-label">Ingresos Brutos</span>
+                                                <div style={{fontSize: '0.95rem', fontWeight: 500}}>
+                                                    {grossIncome || '-'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Notes Card (if exists) */}
+                                    {notes && (
+                                        <div style={{background: '#fffbeb', borderRadius: '1rem', padding: '1.25rem', border: '1px solid #fcd34d'}}>
+                                            <h4 style={{margin: '0 0 0.5rem', fontSize: '0.85rem', textTransform: 'uppercase', color: '#b45309', fontWeight: 700}}>Notas Internas</h4>
+                                            <p style={{margin: 0, fontSize: '0.9rem', color: '#92400e', lineHeight: 1.5, fontStyle: 'italic'}}>
+                                                "{notes}"
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Actions Card */}
+                                     <div style={{background: 'white', borderRadius: '1rem', padding: '1rem', boxShadow: 'var(--shadow-sm)', border: '1px solid #e2e8f0'}}>
+                                        <button onClick={() => setMode('edit')} style={{width: '100%', padding: '0.75rem', background: 'var(--primary-color)', color: 'var(--primary-text)', border: 'none', borderRadius: '0.5rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'}}>
+                                            <i className="fa-solid fa-pen-to-square"></i> Editar Perfil
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 ) : (
@@ -277,9 +527,34 @@ export const SupplierManagementModal: React.FC<SupplierFormModalProps> = ({ onCl
                                         <option value={5}>5 – Premium</option>
                                     </select>
                                 </div>
-                                <div className="form-group">
+                                <div className="form-group" style={{position: 'relative'}}>
                                     <label>Dirección</label>
-                                    <input type="text" value={address} onChange={e => setAddress(e.target.value)} placeholder="Ej: Av. Corrientes 1234" />
+                                    <div className="searchable-select-container">
+                                        <input 
+                                            type="text" 
+                                            value={address} 
+                                            onChange={handleAddressChange} 
+                                            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                                            placeholder="Buscar dirección (Calle, Altura...)"
+                                            style={{width: '100%', paddingRight: '2rem'}}
+                                            autoComplete="off"
+                                        />
+                                        <i className="fa-solid fa-magnifying-glass" style={{position: 'absolute', right: '12px', top: '12px', color: 'var(--text-muted)'}}></i>
+                                    </div>
+                                    {showSuggestions && suggestions.length > 0 && (
+                                        <ul className="search-dropdown" style={{display: 'block', zIndex: 100}}>
+                                            {suggestions.map((s, idx) => (
+                                                <li key={idx} onClick={() => handleSelectSuggestion(s.place_id, s.description)} className="search-result-item">
+                                                    <span className="search-item-name" style={{fontWeight: 400, fontSize: '0.9rem'}}>{s.description}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                    {mapError && (
+                                        <div style={{color: 'var(--error-color)', fontSize: '0.8rem', marginTop: '0.5rem', background: '#fee2e2', padding: '0.5rem', borderRadius: 'var(--radius-md)'}}>
+                                            <i className="fa-solid fa-triangle-exclamation"></i> {mapError}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="form-row three-col">
                                     <div className="form-group">
@@ -312,6 +587,10 @@ export const SupplierManagementModal: React.FC<SupplierFormModalProps> = ({ onCl
                                 <div className="form-group">
                                     <label>Sitio Web</label>
                                     <input type="text" value={website} onChange={e => setWebsite(e.target.value)} onBlur={handleWebsiteBlur} placeholder="www.ejemplo.com" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Notas Internas</label>
+                                    <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anotaciones privadas sobre este proveedor..." style={{minHeight: '80px'}} />
                                 </div>
                             </div>
                         </div>

@@ -1,9 +1,8 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { ai } from '../../lib/gemini';
-import { Product, Supplier, CartItem, DetectedEntity } from '../../types';
+import { Product, Supplier, CartItem, DetectedEntity, PurchaseCategory } from '../../types';
 import { formatCurrency, fileToBase64, formatDate } from '../../utils/formatters';
 
 interface PurchaseModalProps {
@@ -13,14 +12,25 @@ interface PurchaseModalProps {
     suppliers: Supplier[];
     onOpenProductCreate: (data: Partial<Product>) => void;
     onOpenSupplierCreate: (data: Partial<Supplier>) => void;
+    categories: PurchaseCategory[];
+    onOpenCategoryManager: () => void;
 }
 
-export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess, products, suppliers, onOpenProductCreate, onOpenSupplierCreate }) => {
+export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess, products, suppliers, onOpenProductCreate, onOpenSupplierCreate, categories, onOpenCategoryManager }) => {
     const [supplierId, setSupplierId] = useState('');
     const [invoiceNumber, setInvoiceNumber] = useState('');
     const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+    const [categoryId, setCategoryId] = useState('');
     const [items, setItems] = useState<CartItem[]>([]);
     
+    // Default category
+    useEffect(() => {
+        if (!categoryId && categories.length > 0) {
+            const defaultCat = categories.find(c => c.name === 'Mercadería') || categories[0];
+            setCategoryId(defaultCat.id);
+        }
+    }, [categories, categoryId]);
+
     const [productId, setProductId] = useState('');
     const [quantity, setQuantity] = useState('');
     const [unitCost, setUnitCost] = useState('');
@@ -29,7 +39,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
     const [ocrState, setOcrState] = useState<'idle' | 'scanning' | 'resolution' | 'ready'>('idle');
     const [pendingEntities, setPendingEntities] = useState<DetectedEntity[]>([]);
 
-    // Estado para manejar el error visual de duplicados
     const [duplicateError, setDuplicateError] = useState<{ invoice: string; date: string } | null>(null);
 
     const [searchTerm, setSearchTerm] = useState('');
@@ -69,7 +78,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                 return entity;
             });
             
-            // Chequear si hubo cambios para evitar loops infinitos (simple check de known count)
             const prevKnownCount = pendingEntities.filter(e => e.isKnown).length;
             const newKnownCount = updatedEntities.filter(e => e.isKnown).length;
             
@@ -85,7 +93,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                 }
             }
         }
-    }, [products, suppliers, ocrState, pendingEntities.length]); // Added dependency on length to trigger updates on discard
+    }, [products, suppliers, ocrState, pendingEntities.length]);
 
     const syncResolvedItems = (entities: DetectedEntity[]) => {
          const resolvedItems = entities
@@ -143,21 +151,25 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
             setOcrState('scanning');
             try {
                 const base64Data = await fileToBase64(file);
-                const promptText = `Analiza la factura adjunta. Extrae la siguiente información en formato JSON estricto:
+                const categoryNames = categories.map(c => c.name).join(', ');
+                const promptText = `Analiza la factura de compra adjunta. Extrae la siguiente información en formato JSON estricto:
                 - supplier_name: Nombre o razón social del proveedor.
                 - supplier_data: Objeto con { address, city, province, country, phone_details (country_code, area_code, number), website, tax_id (CUIT), gross_income, tax_regime (Responsable Inscripto, Monotributista, Proveedor del exterior, Exento) }. Si CUIT no tiene guiones, formatéalo como XX-XXXXXXXX-X. Si país no está explícito, o por contexto (ej. provincia, código de país de teléfono), asume 'Argentina'. Si el código de país del teléfono no está, asume '54'.
                 - invoice_number: Número de la factura.
                 - date: La fecha de EMISIÓN de la factura. IMPORTANTE: NO uses fechas de vencimiento (Due Date) ni fecha de pedido. Busca "Fecha de Emisión", "Issue Date". Formato estricto YYYY-MM-DD.
+                - category: Clasifica el comprobante en una de las siguientes categorías de COMPRA exactas: ${categoryNames}. Si no estás seguro, usa 'Mercadería'.
                 - items: Array de objetos. Cada uno debe tener: type ('PRODUCT', 'ADJUSTMENT', 'OTHER'), description, quantity, unit_cost, supplier_sku (código del proveedor si existe).
                 Si encuentras descuentos globales o recargos, márcalos como items de tipo 'ADJUSTMENT'.
                 Si encuentras items que no son productos de stock ni ajustes (ej. flete, envío, tasas administrativas), márcalos como 'OTHER'.`;
 
                 const response = await ai.models.generateContent({
                     model: 'gemini-2.5-flash',
-                    contents: [
-                        { inlineData: { mimeType: file.type, data: base64Data } },
-                        { text: promptText }
-                    ],
+                    contents: {
+                        parts: [
+                            { inlineData: { mimeType: file.type, data: base64Data } },
+                            { text: promptText }
+                        ]
+                    },
                     config: { responseMimeType: 'application/json' }
                 });
 
@@ -190,6 +202,12 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
 
                 if (parsedData.invoice_number) setInvoiceNumber(parsedData.invoice_number);
                 if (parsedData.date) setPurchaseDate(parsedData.date);
+                if (parsedData.category) {
+                    const foundCat = categories.find(c => c.name === parsedData.category);
+                    if (foundCat) {
+                        setCategoryId(foundCat.id);
+                    }
+                }
 
                 if (parsedData.items) {
                     parsedData.items.forEach((item: any, idx: number) => {
@@ -283,14 +301,13 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (!supplierId || !invoiceNumber || !purchaseDate || items.length === 0) {
+        if (!supplierId || !invoiceNumber || !purchaseDate || items.length === 0 || !categoryId) {
             alert('Por favor, complete todos los campos requeridos y agregue al menos un producto.');
             return;
         }
 
         setIsSaving(true);
         try {
-            // 1. VALIDACIÓN DE DUPLICADOS CON FECHA
             const { data: existingBatches, error: checkError } = await supabase
                 .from('batches')
                 .select('created_at')
@@ -300,7 +317,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
 
             if (checkError) throw checkError;
 
-            // Si devuelve registros, mostrar pantalla de error visual
             if (existingBatches && existingBatches.length > 0) {
                 setDuplicateError({
                     invoice: invoiceNumber,
@@ -310,7 +326,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                 return;
             }
 
-            // 2. Preparar payload si no es duplicado
             const itemsPayload = items.map(item => ({
                 product_id: item.productId,
                 quantity: item.quantity,
@@ -318,17 +333,16 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                 supplier_sku: pendingEntities.find(pe => pe.matchedId === item.productId)?.data?.sku || ''
             }));
 
-            // 3. Ejecutar transacción
             const { error } = await supabase.rpc('register_bulk_purchase', {
                 p_supplier_id: supplierId,
                 p_invoice_number: invoiceNumber,
                 p_purchase_date: purchaseDate,
+                p_category_id: categoryId,
                 p_items: itemsPayload
             });
 
             if (error) throw error;
 
-            // 4. Éxito
             onSuccess();
             onClose();
         } catch (error: any) {
@@ -339,9 +353,8 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
         }
     };
 
-    const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.unitCost), 0);
+    const totalAmount = items.reduce((sum, item) => sum + (item.quantity * (item.unitCost ?? 0)), 0);
 
-    // Pantalla de Error por Duplicado
     if (duplicateError) {
         return (
              <div className="modal-overlay" style={{zIndex: 1500}}>
@@ -367,7 +380,6 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{height: '90vh', maxHeight: '900px', position: 'relative'}}>
                 
-                {/* Scanning Overlay */}
                 {ocrState === 'scanning' && (
                     <div className="scanning-overlay">
                         <div style={{position: 'relative', width: '300px', height: '200px', background: 'white', borderRadius: '1rem', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', overflow: 'hidden', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
@@ -412,7 +424,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                                         <p>
                                             {entity.type === 'product' ? 'Producto detectado' : 
                                              entity.type === 'supplier' ? 'Proveedor detectado' : 
-                                             entity.type === 'other' ? `Monto/Costo: ${formatCurrency(entity.data.unitCost * (entity.data.quantity || 1))}` :
+                                             entity.type === 'other' ? `Monto/Costo: ${formatCurrency((entity.data.unitCost ?? 0) * (entity.data.quantity || 1))}` :
                                              `Monto: ${formatCurrency(entity.data.amount)}`}
                                         </p>
                                         
@@ -469,33 +481,46 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                         <div className="modal-body-layout single-column">
                             {ocrState === 'idle' && (
                                 <div className="file-upload-zone" onClick={() => document.getElementById('invoiceFile')?.click()}>
-                                    <i className="fa-solid fa-file-invoice file-upload-icon"></i>
-                                    <h3>Carga Inteligente</h3>
+                                    <i className="fa-solid fa-wand-magic-sparkles file-upload-icon"></i>
+                                    <h3>Carga Inteligente con IA</h3>
+                                    <p style={{color: 'var(--text-secondary)', marginTop: '0.5rem'}}>Sube una factura o recibo para autocompletar</p>
                                     <input type="file" id="invoiceFile" style={{display: 'none'}} accept=".pdf,image/*" onChange={handleFileUpload} />
                                 </div>
                             )}
                             <div className="form-section">
                                 <div className="form-row three-col">
                                     <div className="form-group">
-                                        <label htmlFor="supplier">Proveedor</label>
+                                        <label htmlFor="supplier">PROVEEDOR</label>
                                         <select id="supplier" value={supplierId} onChange={e => setSupplierId(e.target.value)} required>
                                             <option value="">Seleccione...</option>
                                             {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                         </select>
                                     </div>
                                     <div className="form-group">
-                                        <label>Nº Factura</label>
+                                        <label>Nº FACTURA</label>
                                         <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="F-0000-0000" required />
                                     </div>
                                     <div className="form-group">
-                                        <label>Fecha Emisión</label>
+                                        <label>FECHA EMISIÓN</label>
                                         <input type="date" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} required />
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label>CATEGORÍA</label>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <select value={categoryId} onChange={e => setCategoryId(e.target.value)} required style={{ flex: 1 }}>
+                                            {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                                        </select>
+                                        <button type="button" className="btn btn-secondary" onClick={onOpenCategoryManager} title="Gestionar Categorías" style={{ flexShrink: 0, padding: '0.75rem' }}>
+                                            <i className="fa-solid fa-cog"></i>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
                             <div className="form-section">
-                                <div style={{display: 'grid', gridTemplateColumns: '3fr 1fr 1fr auto', gap: '1rem', alignItems: 'end', background: 'var(--input-bg)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem'}}>
+                                <div style={{display: 'grid', gridTemplateColumns: '3fr 1fr 1fr auto', gap: '1rem', alignItems: 'end', background: 'var(--input-bg)', padding: '1.25rem', borderRadius: 'var(--radius-md)', marginBottom: '1rem', border: '1px solid var(--border-color)'}}>
                                     <div className="form-group" style={{marginBottom: 0}}>
+                                        <label style={{marginBottom: '0.5rem', display: 'block'}}>PRODUCTO</label>
                                         <div className="searchable-select-container">
                                             <input type="text" placeholder="Buscar..." value={searchTerm} onChange={handleSearchChange} onFocus={() => setShowDropdown(true)} />
                                             {showDropdown && searchTerm && !productId && (
@@ -509,9 +534,15 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ onClose, onSuccess
                                             )}
                                         </div>
                                     </div>
-                                    <div className="form-group" style={{marginBottom: 0}}><input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} /></div>
-                                    <div className="form-group" style={{marginBottom: 0}}><input type="number" min="0" step="0.01" value={unitCost} onChange={e => setUnitCost(e.target.value)} /></div>
-                                    <button type="button" className="btn btn-secondary" onClick={addItem} disabled={!productId}><i className="fa-solid fa-plus"></i></button>
+                                    <div className="form-group" style={{marginBottom: 0}}>
+                                        <label style={{marginBottom: '0.5rem', display: 'block'}}>CANTIDAD</label>
+                                        <input type="number" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{marginBottom: 0}}>
+                                        <label style={{marginBottom: '0.5rem', display: 'block'}}>COSTO UNIT. ($)</label>
+                                        <input type="number" min="0" step="0.01" value={unitCost} onChange={e => setUnitCost(e.target.value)} />
+                                    </div>
+                                    <button type="button" className="btn btn-secondary" onClick={addItem} disabled={!productId} style={{height: '46px', width: '46px', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><i className="fa-solid fa-plus"></i></button>
                                 </div>
                                 {items.length > 0 && (
                                     <div className="items-table-container">

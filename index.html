@@ -111,6 +111,7 @@
         .nav-tabs {
             display: flex;
             gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         .nav-tab {
@@ -533,6 +534,17 @@
             overflow: hidden; 
         }
 
+        /* COMPACT MODAL VARIANT */
+        .modal-content.compact {
+            max-width: 480px;
+            width: 100%;
+            height: 75vh;
+            max-height: 650px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
         .modal-header {
             flex-shrink: 0; 
             display: flex;
@@ -826,15 +838,16 @@
         }
         
         .ai-badge {
-            background: linear-gradient(135deg, var(--bg-gradient-blue), var(--accent-color));
-            color: white;
-            padding: 4px 10px;
-            border-radius: 99px;
-            font-size: 0.75rem;
-            font-weight: 700;
+            background: #f1f5f9; /* Discreet grey background */
+            color: var(--text-secondary); /* Dark grey text */
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
             display: inline-flex;
             align-items: center;
             gap: 5px;
+            border: 1px solid var(--border-color);
         }
 
         .resolution-card {
@@ -1136,10 +1149,125 @@
             margin-top: 0.25rem;
         }
 
+        /* --- Category Management List (Modern CSS Grid 3-Column) --- */
+        
+        /* New Add Category Section (Fixed at top of body) */
+        .add-category-section {
+            background-color: var(--surface-color);
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0; /* Don't shrink */
+        }
+        
+        /* Scrollable Category List Container */
+        .category-list-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem 1.5rem;
+            background-color: white;
+        }
+
+        .category-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            padding: 4px; /* Minimal padding for shadow spread */
+            margin: -4px; /* Offset margins */
+        }
+
+        .category-item {
+            display: grid;
+            /* CRITICAL FIX: minmax(0, 1fr) ensures the content column shrinks to fit available space, preventing overflow */
+            grid-template-columns: 48px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            transition: all 0.2s ease;
+        }
+
+        .category-item:hover {
+            border-color: var(--bg-gradient-blue);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+
+        .category-item.editing {
+            border-color: var(--accent-color);
+            background: #ecfeff;
+            box-shadow: 0 0 0 2px rgba(8, 145, 178, 0.1);
+            transform: none;
+        }
+
+        .category-icon-container {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: var(--input-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+        
+        .category-item:hover .category-icon-container {
+            background: var(--bg-gradient-blue);
+            color: white;
+        }
+
+        .category-content {
+            min-width: 0; /* Ensures children can shrink below content size if needed */
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+
+        .category-name-text {
+            font-weight: 600;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: block;
+            width: 100%;
+        }
+
+        .category-input {
+            width: 100%;
+            display: block;
+            padding: 0.6rem;
+            border: 1px solid var(--accent-color);
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+            outline: none;
+            background: white;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            box-sizing: border-box; /* Strict sizing including padding/border */
+        }
+        
+        .category-input:focus {
+            box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.2);
+        }
+
+        .category-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-shrink: 0;
+        }
+        
+        /* Fix Google Places Autocomplete z-index */
+        .pac-container {
+            z-index: 10000 !important;
+        }
+
         @media (max-width: 768px) {
             .header-actions { width: 100%; justify-content: space-between; }
             header { flex-direction: column; align-items: flex-start; }
             .modal-content { width: 100%; height: 100%; border-radius: 0; }
+            .modal-content.compact { width: 100%; height: 100%; border-radius: 0; max-height: none; }
             .modal-body-layout { grid-template-columns: 1fr; padding: 1.5rem; gap: 1.5rem; }
             .form-row, .detail-row { grid-template-columns: 1fr; }
             .form-row.three-col { grid-template-columns: 1fr; }
@@ -1159,10 +1287,14 @@
     "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.84.0",
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
     "qrcode": "https://aistudiocdn.com/qrcode@^1.5.3",
-    "qrcode.react": "https://aistudiocdn.com/qrcode.react@^4.2.0"
+    "qrcode.react": "https://aistudiocdn.com/qrcode.react@^4.2.0",
+    "react-icons/io5": "https://aistudiocdn.com/react-icons@^5.4.0/io5/index.js",
+    "react-icons/": "https://aistudiocdn.com/react-icons@^5.5.0/",
+    "html5-qrcode": "https://aistudiocdn.com/html5-qrcode@^2.3.8"
   }
 }
 </script>
+<script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDEFCiAg4VcOvImldhQqMwenPaNlPvgswY&libraries=places"></script>
 <link rel="stylesheet" href="/index.css">
 </head>
 <body>
@@ -1171,496 +1303,3 @@
     <script type="module" src="/index.tsx"></script>
 </body>
 </html>
-<change>
-    <file>components/coupons/CouponManagementModal.tsx</file>
-    <description>Reemplazo completo de la lógica de generación de QR para usar la librería `qrcode` nativa con un canvas, eliminando la dependencia del componente React problemático y resolviendo los errores de `useRef` y `#525`.</description>
-    <content><![CDATA[
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '../../lib/supabase';
-import { Coupon, Product } from '../../types';
-import { formatCurrency, formatDate } from '../../utils/formatters';
-import QRCode from 'qrcode'; // Native JS library from importmap
-
-// Constants for coupon rules
-const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Tarjeta', 'QR'];
-const DAYS_OF_WEEK = [
-    { label: 'Domingo', value: 0 },
-    { label: 'Lunes', value: 1 },
-    { label: 'Martes', value: 2 },
-    { label: 'Miércoles', value: 3 },
-    { label: 'Jueves', value: 4 },
-    { label: 'Viernes', value: 5 },
-    { label: 'Sábado', value: 6 },
-];
-const QR_CODE_STORAGE_BUCKET = 'coupon-qrs'; 
-
-interface CouponManagementModalProps {
-    onClose: () => void;
-    onSuccess: () => void;
-    couponToEdit?: Coupon | null;
-    products: Product[];
-}
-
-// Pure function to generate a coupon code
-const generateCouponCode = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-};
-
-
-export const CouponManagementModal: React.FC<CouponManagementModalProps> = ({ onClose, onSuccess, couponToEdit, products }) => {
-    const [mode, setMode] = useState<'view' | 'edit'>((couponToEdit) ? 'view' : 'edit');
-    const [isSaving, setIsSaving] = useState(false);
-
-    // Coupon Data
-    const [campaignName, setCampaignName] = useState('');
-    const [code, setCode] = useState('');
-    const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent');
-    const [discountValue, setDiscountValue] = useState('');
-    const [validFrom, setValidFrom] = useState(new Date().toISOString().split('T')[0]);
-    const [validUntil, setValidUntil] = useState(new Date().toISOString().split('T')[0]);
-    const [status, setStatus] = useState<'Activo' | 'Agotado' | 'Finalizado' | 'Suspendido'>('Activo');
-
-    // Rule Toggles & Values
-    const [enableMaxUses, setEnableMaxUses] = useState(false);
-    const [maxUsesTotal, setMaxUsesTotal] = useState('');
-
-    const [enableMinPurchase, setEnableMinPurchase] = useState(false);
-    const [minPurchaseAmount, setMinPurchaseAmount] = useState('');
-
-    const [enableProductSpecific, setEnableProductSpecific] = useState(false);
-    const [appliesToProductId, setAppliesToProductId] = useState('');
-
-    const [enablePaymentMethod, setEnablePaymentMethod] = useState(false);
-    const [validPaymentMethods, setValidPaymentMethods] = useState<string[]>([]);
-
-    const [enableDaysOfWeek, setEnableDaysOfWeek] = useState(false);
-    const [validDaysOfWeek, setValidDaysOfWeek] = useState<number[]>([]);
-
-    const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
-
-    const qrCanvasRef = useRef<HTMLCanvasElement>(null);
-
-    const populateForm = useCallback(() => {
-        if (couponToEdit) {
-            setCampaignName(couponToEdit.campaign_name);
-            setCode(couponToEdit.code);
-            setDiscountType(couponToEdit.discount_type);
-            setDiscountValue(couponToEdit.discount_value.toString());
-            setValidFrom(couponToEdit.valid_from);
-            setValidUntil(couponToEdit.valid_until);
-            setStatus(couponToEdit.status);
-
-            setEnableMaxUses(couponToEdit.max_uses_total !== null && couponToEdit.max_uses_total !== undefined);
-            setMaxUsesTotal(couponToEdit.max_uses_total?.toString() || '');
-
-            setEnableMinPurchase(couponToEdit.min_purchase_amount !== null && couponToEdit.min_purchase_amount !== undefined);
-            setMinPurchaseAmount(couponToEdit.min_purchase_amount?.toString() || '');
-
-            setEnableProductSpecific(couponToEdit.applies_to_product_id !== null && couponToEdit.applies_to_product_id !== undefined);
-            setAppliesToProductId(couponToEdit.applies_to_product_id || '');
-
-            setEnablePaymentMethod(couponToEdit.valid_payment_methods && couponToEdit.valid_payment_methods.length > 0);
-            setValidPaymentMethods(couponToEdit.valid_payment_methods || []);
-
-            setEnableDaysOfWeek(couponToEdit.valid_days_of_week && couponToEdit.valid_days_of_week.length > 0);
-            setValidDaysOfWeek(couponToEdit.valid_days_of_week || []);
-            
-            setQrCodeDataUrl(couponToEdit.qr_code_url || null);
-
-        } else {
-            setCampaignName('');
-            setCode(generateCouponCode());
-            setDiscountType('percent');
-            setDiscountValue('');
-            setValidFrom(new Date().toISOString().split('T')[0]);
-            setValidUntil(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]); 
-            setStatus('Activo');
-
-            setEnableMaxUses(false); setMaxUsesTotal('');
-            setEnableMinPurchase(false); setMinPurchaseAmount('');
-            setEnableProductSpecific(false); setAppliesToProductId('');
-            setEnablePaymentMethod(false); setValidPaymentMethods([]);
-            setEnableDaysOfWeek(false); setValidDaysOfWeek([]);
-            setQrCodeDataUrl(null);
-        }
-    }, [couponToEdit]);
-
-    useEffect(() => { populateForm(); }, [populateForm]);
-
-    // Effect to draw QR code on canvas whenever code changes
-    useEffect(() => {
-        if (code && qrCanvasRef.current) {
-            QRCode.toCanvas(qrCanvasRef.current, code, { width: 256, margin: 1 }, (error: any) => {
-                if (error) console.error("QR Generation Error:", error);
-            });
-        }
-    }, [code, mode]); // Trigger on mode change too to ensure canvas is ready
-
-    const handlePaymentMethodToggle = (method: string) => {
-        setValidPaymentMethods(prev =>
-            prev.includes(method) ? prev.filter(m => m !== method) : [...prev, method]
-        );
-    };
-
-    const handleDayOfWeekToggle = (day: number) => {
-        setValidDaysOfWeek(prev =>
-            prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
-        );
-    };
-
-    const generateAndUploadQRCode = async (couponCode: string, couponId: string) => {
-        if (!qrCanvasRef.current) {
-            console.error("Canvas ref is null, cannot generate QR blob");
-            return null;
-        }
-
-        try {
-            const qrImageBlob: Blob = await new Promise(resolve => qrCanvasRef.current!.toBlob(blob => resolve(blob!), 'image/png'));
-            const fileName = `coupon-${couponId}-qr.png`;
-
-            const { data, error } = await supabase.storage.from(QR_CODE_STORAGE_BUCKET).upload(fileName, qrImageBlob, {
-                cacheControl: '3600',
-                upsert: true,
-            });
-
-            if (error) throw error;
-
-            const { data: publicUrlData } = supabase.storage.from(QR_CODE_STORAGE_BUCKET).getPublicUrl(fileName);
-            if (!publicUrlData.publicUrl) throw new Error("No se pudo obtener la URL pública del QR");
-            
-            setQrCodeDataUrl(publicUrlData.publicUrl);
-            return publicUrlData.publicUrl;
-        } catch (error) {
-            console.error("Error al subir el QR:", error);
-            return null;
-        }
-    };
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!campaignName || !code || !discountValue || !validFrom || !validUntil || isNaN(parseFloat(discountValue))) {
-            alert("Por favor, complete todos los campos obligatorios.");
-            return;
-        }
-
-        setIsSaving(true);
-
-        const couponData = {
-            campaign_name: campaignName,
-            code,
-            discount_type: discountType,
-            discount_value: parseFloat(discountValue),
-            valid_from: validFrom,
-            valid_until: validUntil,
-            status,
-            max_uses_total: enableMaxUses ? (parseInt(maxUsesTotal) || null) : null,
-            min_purchase_amount: enableMinPurchase ? (parseFloat(minPurchaseAmount) || null) : null,
-            applies_to_product_id: enableProductSpecific ? (appliesToProductId || null) : null,
-            valid_payment_methods: enablePaymentMethod ? validPaymentMethods : [],
-            valid_days_of_week: enableDaysOfWeek ? validDaysOfWeek : [],
-        };
-
-        try {
-            let currentCouponId = couponToEdit?.id;
-            if (couponToEdit) {
-                const { error } = await supabase.from('coupons').update(couponData).eq('id', couponToEdit.id);
-                if (error) throw error;
-                currentCouponId = couponToEdit.id;
-            } else {
-                const { data, error } = await supabase.from('coupons').insert([couponData]).select('id').single();
-                if (error) throw error;
-                currentCouponId = data.id;
-            }
-
-            if (currentCouponId && code) {
-                const qrUrl = await generateAndUploadQRCode(code, currentCouponId);
-                if (qrUrl) {
-                    await supabase.from('coupons').update({ qr_code_url: qrUrl }).eq('id', currentCouponId);
-                }
-            }
-            onSuccess();
-            onClose();
-
-        } catch (error: any) {
-            console.error("Error al guardar cupón:", error);
-            alert("Error al guardar el cupón: " + (error.message || 'Error desconocido'));
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleCancelEdit = () => {
-        if (couponToEdit) {
-            setMode('view');
-            populateForm();
-        } else {
-            onClose();
-        }
-    };
-
-    const title = mode === 'view' ? 'Detalle de Cupón' : (couponToEdit ? 'Editar Cupón' : 'Nuevo Cupón');
-
-    // Display values for view mode
-    const currentProduct = products.find(p => p.id === appliesToProductId);
-
-    return (
-        <div className={`modal-overlay`} onClick={onClose}>
-            <div className="modal-content" onClick={e => e.stopPropagation()} style={{maxWidth: '1200px', height: '90vh'}}>
-                <div className="modal-header">
-                    <div>
-                        <h2>{title}</h2>
-                        {couponToEdit && <span className="modal-subtitle">Código: {couponToEdit.code}</span>}
-                    </div>
-                    <button onClick={onClose} className="close-btn"><i className="fa-solid fa-xmark"></i></button>
-                </div>
-
-                {mode === 'view' ? (
-                    <div className="modal-form">
-                        <div className="modal-body-layout" style={{gridTemplateColumns: '1fr 0.5fr'}}>
-                            <div className="form-section">
-                                <div className="coupon-view-details-card">
-                                    <h4 style={{marginBottom: '0.5rem'}}>Campaña</h4>
-                                    <div className="detail-value" style={{fontSize: '1.8rem', fontWeight: 700}}>{campaignName}</div>
-                                    <div style={{display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1rem'}}>
-                                        <span className={`status-badge status-${status.toLowerCase()}`}>{status}</span>
-                                        <div style={{background: '#dbeafe', color: '#1e3a8a', padding: '0.5rem 1rem', borderRadius: 'var(--radius-md)', fontWeight: 600}}>
-                                            <i className="fa-solid fa-tag" style={{marginRight: '0.5rem'}}></i> {code}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem'}}>
-                                    <div className="coupon-view-details-card">
-                                        <h4>Descuento</h4>
-                                        <div className="detail-value" style={{fontSize: '2rem', fontWeight: 800, color: '#10b981'}}>
-                                            {discountType === 'percent' ? `${discountValue}%` : formatCurrency(parseFloat(discountValue))}
-                                        </div>
-                                        <p style={{fontSize: '0.9rem', color: 'var(--text-secondary)'}}>
-                                            {discountType === 'percent' ? 'Porcentaje sobre el total de la compra.' : 'Monto fijo de descuento.'}
-                                        </p>
-                                    </div>
-                                    <div className="coupon-view-details-card">
-                                        <h4>Vigencia</h4>
-                                        <div className="detail-value">Del {formatDate(validFrom)}</div>
-                                        <div className="detail-value">Al {formatDate(validUntil)}</div>
-                                        <p style={{fontSize: '0.9rem', color: 'var(--text-secondary)', marginTop: '0.5rem'}}>
-                                            {new Date(validUntil) < new Date() ? 'Finalizado' : (new Date(validFrom) > new Date() ? 'Próximamente' : 'Activo')}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="coupon-view-details-card">
-                                    <h4>Reglas Activas</h4>
-                                    <div style={{display: 'grid', gap: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)'}}>
-                                        {enableMaxUses && <div><i className="fa-solid fa-users" style={{marginRight: '0.5rem'}}></i> Límite de usos: {maxUsesTotal} (Usos actuales: {couponToEdit?.current_uses || 0})</div>}
-                                        {enableMinPurchase && <div><i className="fa-solid fa-money-bill-wave" style={{marginRight: '0.5rem'}}></i> Compra mínima: {formatCurrency(parseFloat(minPurchaseAmount))}</div>}
-                                        {enableProductSpecific && currentProduct && <div><i className="fa-solid fa-box" style={{marginRight: '0.5rem'}}></i> Producto específico: {currentProduct.name} (#{currentProduct.material_code})</div>}
-                                        {enablePaymentMethod && <div><i className="fa-solid fa-credit-card" style={{marginRight: '0.5rem'}}></i> Medios de pago: {validPaymentMethods.join(', ')}</div>}
-                                        {enableDaysOfWeek && <div><i className="fa-solid fa-calendar-day" style={{marginRight: '0.5rem'}}></i> Días de la semana: {validDaysOfWeek.map(d => DAYS_OF_WEEK[d].label).join(', ')}</div>}
-                                        {!enableMaxUses && !enableMinPurchase && !enableProductSpecific && !enablePaymentMethod && !enableDaysOfWeek && (
-                                            <div>No hay reglas de uso adicionales.</div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="form-section">
-                                <div className="coupon-view-details-card" style={{height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'}}>
-                                    <h4>Código QR</h4>
-                                    <p style={{color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1.5rem', textAlign: 'center'}}>Escanea para aplicar el cupón.</p>
-                                    {qrCodeDataUrl ? (
-                                        <img src={qrCodeDataUrl} alt="Código QR del cupón" style={{width: '200px', height: '200px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)'}} />
-                                    ) : (
-                                        <div style={{width: '200px', height: '200px', background: 'var(--input-bg)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)'}}>
-                                            <i className="fa-solid fa-qrcode" style={{fontSize: '4rem'}}></i>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button type="button" className="btn btn-secondary" onClick={onClose}>Cerrar</button>
-                            <button type="button" className="btn btn-primary" onClick={() => setMode('edit')}><i className="fa-solid fa-pen-to-square"></i> Editar Cupón</button>
-                        </div>
-                    </div>
-                ) : (
-                    <form onSubmit={handleSubmit} className="modal-form">
-                        <div className="modal-body-layout">
-                            <div className="form-section">
-                                <div className="form-group">
-                                    <label htmlFor="campaignName">Nombre de Campaña</label>
-                                    <input id="campaignName" type="text" value={campaignName} onChange={e => setCampaignName(e.target.value)} required autoFocus />
-                                </div>
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label htmlFor="couponCode">Código del Cupón</label>
-                                        <div style={{display: 'flex', gap: '0.5rem'}}>
-                                            <input id="couponCode" type="text" value={code} onChange={e => setCode(e.target.value)} required />
-                                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCode(generateCouponCode())}><i className="fa-solid fa-arrows-rotate"></i></button>
-                                        </div>
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Estado</label>
-                                        <select value={status} onChange={e => setStatus(e.target.value as any)}>
-                                            <option value="Activo">Activo</option>
-                                            <option value="Suspendido">Suspendido</option>
-                                            <option value="Finalizado">Finalizado</option>
-                                            <option value="Agotado">Agotado</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label>Válido Desde</label>
-                                        <input type="date" value={validFrom} onChange={e => setValidFrom(e.target.value)} required />
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Válido Hasta</label>
-                                        <input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} required />
-                                    </div>
-                                </div>
-                                <div className="form-row">
-                                    <div className="form-group">
-                                        <label>Tipo de Descuento</label>
-                                        <select value={discountType} onChange={e => setDiscountType(e.target.value as any)}>
-                                            <option value="percent">Porcentaje (%)</option>
-                                            <option value="fixed">Monto Fijo ($)</option>
-                                        </select>
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Valor del Descuento</label>
-                                        <input type="number" value={discountValue} onChange={e => setDiscountValue(e.target.value)} required step="0.01" />
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="form-section">
-                                <h3 style={{margin: '0 0 1rem', fontSize: '1rem', color: 'var(--text-main)', fontWeight: 700}}>Reglas de Negocio <i className="fa-solid fa-gears" style={{marginLeft: '0.5rem', color: 'var(--text-muted)'}}></i></h3>
-                                <div className="coupon-rules-section">
-                                    {/* Max Uses Rule */}
-                                    <div>
-                                        <div className="coupon-rule-toggle" onClick={() => setEnableMaxUses(!enableMaxUses)}>
-                                            <div>
-                                                <div className="label">Límite de Usos Totales</div>
-                                                <div className="description">Máximo número de veces que se puede aplicar este cupón.</div>
-                                            </div>
-                                            <div className={`toggle-switch ${enableMaxUses ? 'active' : ''}`}></div>
-                                        </div>
-                                        {enableMaxUses && (
-                                            <div className="rule-details-single-col form-group" style={{marginTop: '0.5rem'}}>
-                                                <label>Número de Usos</label>
-                                                <input type="number" value={maxUsesTotal} onChange={e => setMaxUsesTotal(e.target.value)} min="1" placeholder="Ej: 100" />
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    {/* Minimum Purchase Amount Rule */}
-                                    <div>
-                                        <div className="coupon-rule-toggle" onClick={() => setEnableMinPurchase(!enableMinPurchase)}>
-                                            <div>
-                                                <div className="label">Monto Mínimo de Compra</div>
-                                                <div className="description">Requiere una compra igual o superior a un valor.</div>
-                                            </div>
-                                            <div className={`toggle-switch ${enableMinPurchase ? 'active' : ''}`}></div>
-                                        </div>
-                                        {enableMinPurchase && (
-                                            <div className="rule-details-single-col form-group" style={{marginTop: '0.5rem'}}>
-                                                <label>Monto Mínimo ($)</label>
-                                                <input type="number" step="0.01" value={minPurchaseAmount} onChange={e => setMinPurchaseAmount(e.target.value)} min="0" placeholder="Ej: 5000" />
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Product Specific Rule */}
-                                    <div>
-                                        <div className="coupon-rule-toggle" onClick={() => setEnableProductSpecific(!enableProductSpecific)}>
-                                            <div>
-                                                <div className="label">Producto Específico</div>
-                                                <div className="description">El cupón solo es válido para un producto.</div>
-                                            </div>
-                                            <div className={`toggle-switch ${enableProductSpecific ? 'active' : ''}`}></div>
-                                        </div>
-                                        {enableProductSpecific && (
-                                            <div className="rule-details-single-col form-group" style={{marginTop: '0.5rem'}}>
-                                                <label>Seleccione Producto</label>
-                                                <select value={appliesToProductId} onChange={e => setAppliesToProductId(e.target.value)}>
-                                                    <option value="">Cualquier Producto</option>
-                                                    {products.map(p => (
-                                                        <option key={p.id} value={p.id}>{p.name} (#{p.material_code})</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Payment Method Rule */}
-                                    <div>
-                                        <div className="coupon-rule-toggle" onClick={() => setEnablePaymentMethod(!enablePaymentMethod)}>
-                                            <div>
-                                                <div className="label">Medio de Pago Válido</div>
-                                                <div className="description">Restringe el uso a ciertos medios de pago.</div>
-                                            </div>
-                                            <div className={`toggle-switch ${enablePaymentMethod ? 'active' : ''}`}></div>
-                                        </div>
-                                        {enablePaymentMethod && (
-                                            <div className="rule-details-single-col form-group" style={{marginTop: '0.5rem'}}>
-                                                <label>Seleccione Medios</label>
-                                                <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.5rem'}}>
-                                                    {PAYMENT_METHODS.map(method => (
-                                                        <button type="button" key={method} 
-                                                                className={`btn btn-sm ${validPaymentMethods.includes(method) ? 'btn-primary' : 'btn-secondary'}`}
-                                                                onClick={() => handlePaymentMethodToggle(method)}
-                                                                style={{minWidth: '120px'}}>
-                                                            {method}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    {/* Days of Week Rule */}
-                                    <div>
-                                        <div className="coupon-rule-toggle" onClick={() => setEnableDaysOfWeek(!enableDaysOfWeek)}>
-                                            <div>
-                                                <div className="label">Días de la Semana Válidos</div>
-                                                <div className="description">El cupón solo se puede usar ciertos días.</div>
-                                            </div>
-                                            <div className={`toggle-switch ${enableDaysOfWeek ? 'active' : ''}`}></div>
-                                        </div>
-                                        {enableDaysOfWeek && (
-                                            <div className="rule-details-single-col form-group" style={{marginTop: '0.5rem'}}>
-                                                <label>Seleccione Días</label>
-                                                <div style={{display: 'flex', flexWrap: 'wrap', gap: '0.5rem'}}>
-                                                    {DAYS_OF_WEEK.map(day => (
-                                                        <button type="button" key={day.value}
-                                                                className={`btn btn-sm ${validDaysOfWeek.includes(day.value) ? 'btn-primary' : 'btn-secondary'}`}
-                                                                onClick={() => handleDayOfWeekToggle(day.value)}
-                                                                style={{minWidth: '80px'}}>
-                                                            {day.label.substring(0,3)}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                                {/* Hidden Canvas for QR Code Generation - Used by generateAndUploadQRCode */}
-                                <canvas ref={qrCanvasRef} style={{ display: 'none' }}></canvas>
-                            </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button type="button" className="btn btn-secondary" onClick={handleCancelEdit}>Cancelar</button>
-                            <button type="submit" className="btn btn-primary" disabled={isSaving}>{isSaving ? 'Guardando...' : (couponToEdit ? 'Actualizar Cupón' : 'Crear Cupón')}</button>
-                        </div>
-                    </form>
-                )}
-            </div>
-        </div>
-    );
-};
-]]></content>
-</change>
-</changes>

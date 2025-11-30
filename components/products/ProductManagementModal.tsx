@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { Product, Supplier } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { ModernImageManager } from '../common/ModernImageManager';
+import { QRCodeCanvas } from 'qrcode.react';
 
 interface SupplierCodeItem {
     supplierId: string;
@@ -169,6 +170,10 @@ export const ProductManagementModal: React.FC<ProductFormModalProps> = ({ onClos
                                             {currentStock} un. 
                                             {parseInt(currentStock) <= parseInt(minStock) && <span className="stock-warning-text"> (Bajo Stock)</span>}
                                         </div>
+                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <i className="fa-solid fa-bell" style={{ fontSize: '0.75rem', opacity: 0.7 }}></i>
+                                            <span>Mínimo: <strong>{minStock}</strong> un.</span>
+                                        </div>
                                     </div>
                                 </div>
                                 <div className="detail-group">
@@ -188,9 +193,29 @@ export const ProductManagementModal: React.FC<ProductFormModalProps> = ({ onClos
                                         <div className="text-muted" style={{fontSize: '0.9rem', fontStyle: 'italic'}}>No hay proveedores asignados.</div>
                                     )}
                                 </div>
-                                <div className="detail-group" style={{flex: 1}}>
+                                <div className="detail-group">
                                     <span className="detail-label">Descripción</span>
                                     <div className="detail-description">{description || <span className="text-muted">Sin descripción.</span>}</div>
+                                </div>
+
+                                {/* QR Code Section for POS */}
+                                <div className="detail-group" style={{marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px dashed var(--border-color)'}}>
+                                    <span className="detail-label" style={{marginBottom: '0.75rem', display: 'block'}}>
+                                        <i className="fa-solid fa-qrcode" style={{marginRight: '6px', color: 'var(--text-main)'}}></i> Código QR para Caja (POS)
+                                    </span>
+                                    <div style={{display: 'flex', gap: '1.5rem', alignItems: 'center'}}>
+                                        <div style={{background: 'white', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)', boxShadow: '0 2px 4px rgba(0,0,0,0.05)'}}>
+                                             <QRCodeCanvas
+                                                value={productToEdit?.id || ''}
+                                                size={100}
+                                                level={"H"}
+                                                includeMargin={false}
+                                            />
+                                        </div>
+                                        <div style={{fontSize: '0.9rem', color: 'var(--text-secondary)'}}>
+                                            <p style={{margin: '0 0 0.5rem', lineHeight: '1.4'}}>Escanea este código desde el módulo de <strong>Caja</strong> para agregar el producto a la venta rápidamente.</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div className="form-section">

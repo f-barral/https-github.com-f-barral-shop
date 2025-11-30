@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabase';
-import { Product, Supplier, Batch, Sale, Coupon } from './types';
+import { Product, Supplier, Batch, Sale, Coupon, Expense, PurchaseCategory, ExpenseCategory, CartItem } from './types';
 import { formatCurrency, formatDate, formatNumber, REPUTATION_LEVELS } from './utils/formatters';
 import { ReputationStars } from './components/common/ReputationStars';
 import { ProductManagementModal } from './components/products/ProductManagementModal';
@@ -10,6 +10,16 @@ import { PurchaseModal } from './components/purchases/PurchaseModal';
 import { SaleModal } from './components/sales/SaleModal';
 import { CouponManagementModal } from './components/coupons/CouponManagementModal';
 import { CouponTable } from './components/coupons/CouponTable';
+import { ExpenseModal } from './components/expenses/ExpenseModal';
+import { ExpenseTable } from './components/expenses/ExpenseTable';
+import { CategoryManagementModal } from './components/categories/CategoryManagementModal';
+import { PriceDetermination } from './components/prices/PriceDetermination';
+import { FinancialAnalysis } from './components/financials/FinancialAnalysis';
+import { MarketplaceView } from './components/marketplace/MarketplaceView';
+import { MarketplaceDetailModal } from './components/marketplace/MarketplaceDetailModal';
+import { MarketplaceCartModal } from './components/marketplace/MarketplaceCartModal';
+import { PointOfSaleView } from './components/pos/PointOfSaleView';
+import { MobileScannerView } from './components/pos/MobileScannerView';
 
 
 const ProductCard: React.FC<{ product: Product, onClick: (p: Product) => void }> = ({ product, onClick }) => {
@@ -205,7 +215,17 @@ const SupplierTable: React.FC<{ suppliers: Supplier[], onClick: (s: Supplier) =>
 
 
 export const App: React.FC = () => {
-    const [currentTab, setCurrentTab] = useState<'products' | 'suppliers' | 'purchases' | 'sales' | 'coupons'>('products');
+    // Check for mobile scanner mode
+    const [isMobileScanner, setIsMobileScanner] = useState(false);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('mode') === 'scanner') {
+            setIsMobileScanner(true);
+        }
+    }, []);
+
+    const [currentTab, setCurrentTab] = useState<'products' | 'suppliers' | 'purchases' | 'sales' | 'coupons' | 'expenses' | 'prices' | 'financials' | 'marketplace' | 'pos'>('products');
     const [productsView, setProductsView] = useState<'grid' | 'table'>('grid');
     const [suppliersView, setSuppliersView] = useState<'grid' | 'table'>('grid');
 
@@ -214,6 +234,9 @@ export const App: React.FC = () => {
     const [batches, setBatches] = useState<Batch[]>([]);
     const [sales, setSales] = useState<Sale[]>([]);
     const [coupons, setCoupons] = useState<Coupon[]>([]);
+    const [expenses, setExpenses] = useState<Expense[]>([]);
+    const [purchaseCategories, setPurchaseCategories] = useState<PurchaseCategory[]>([]);
+    const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
     
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -229,20 +252,73 @@ export const App: React.FC = () => {
     const [isCouponModalOpen, setIsCouponModalOpen] = useState(false);
     const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
 
+    const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+    const [categoryManagerType, setCategoryManagerType] = useState<'purchase' | 'expense' | null>(null);
+
+    // Marketplace State
+    const [selectedMarketplaceProduct, setSelectedMarketplaceProduct] = useState<Product | null>(null);
+    const [cartItems, setCartItems] = useState<CartItem[]>([]);
+    const [isCartOpen, setIsCartOpen] = useState(false);
+
+    // Cart Handlers
+    const handleAddToCart = (product: Product) => {
+        setCartItems(prev => {
+            const existing = prev.find(item => item.productId === product.id);
+            if (existing) {
+                return prev.map(item => 
+                    item.productId === product.id 
+                        ? { ...item, quantity: item.quantity + 1 }
+                        : item
+                );
+            } else {
+                return [...prev, {
+                    productId: product.id,
+                    productName: product.name,
+                    materialCode: product.material_code,
+                    quantity: 1,
+                    unitPrice: product.price
+                }];
+            }
+        });
+    };
+
+    const handleRemoveFromCart = (productId: string) => {
+        setCartItems(prev => prev.filter(item => item.productId !== productId));
+    };
+
+    const handleUpdateCartQuantity = (productId: string, newQuantity: number) => {
+        if (newQuantity < 1) return;
+        setCartItems(prev => prev.map(item => 
+            item.productId === productId ? { ...item, quantity: newQuantity } : item
+        ));
+    };
+
+    const handleClearCart = () => setCartItems([]);
+
+
     const fetchData = useCallback(async () => {
         const { data: p } = await supabase.from('products').select(`*, product_suppliers(supplier_id, supplier_material_code, suppliers(name, supplier_code))`).order('created_at', { ascending: false });
         if(p) setProducts(p);
         const { data: s } = await supabase.from('suppliers').select('*').order('created_at', { ascending: false });
         if(s) setSuppliers(s);
-        const { data: b } = await supabase.from('batches').select('*, products(name, material_code), suppliers(name)').order('created_at', { ascending: false });
-        if(b) setBatches(b);
+        const { data: b } = await supabase.from('batches').select('*, products(name, material_code), suppliers(name), purchase_categories(name)').order('created_at', { ascending: false });
+        if(b) setBatches(b as any);
         const { data: sl } = await supabase.from('sales').select('*, products(name, material_code)').order('created_at', { ascending: false });
         if(sl) setSales(sl);
         const { data: co } = await supabase.from('coupons').select('*, products(name, material_code)').order('created_at', { ascending: false });
         if(co) setCoupons(co);
+        const { data: exp } = await supabase.from('expenses').select('*, suppliers(name), expense_categories(name)').order('expense_date', { ascending: false });
+        if(exp) setExpenses(exp as any);
+        const { data: pCat } = await supabase.from('purchase_categories').select('*').order('name', { ascending: true });
+        if(pCat) setPurchaseCategories(pCat);
+        const { data: eCat } = await supabase.from('expense_categories').select('*').order('name', { ascending: true });
+        if(eCat) setExpenseCategories(eCat);
     }, []);
 
-    useEffect(() => { fetchData(); }, [fetchData]);
+    useEffect(() => { 
+        if (!isMobileScanner) fetchData(); 
+    }, [fetchData, isMobileScanner]);
 
     const handleOpenProduct = (p?: Product) => { setEditingProduct(p || null); setInitialProductData(null); setIsProductModalOpen(true); };
     const handleOpenSupplier = (s?: Supplier) => { setEditingSupplier(s || null); setInitialSupplierData(null); setIsSupplierModalOpen(true); };
@@ -250,6 +326,14 @@ export const App: React.FC = () => {
     
     const handleOpenProductFromAgent = (data: Partial<Product>) => { setEditingProduct(null); setInitialProductData(data); setIsProductModalOpen(true); };
     const handleOpenSupplierFromAgent = (data: Partial<Supplier>) => { setEditingSupplier(null); setInitialSupplierData(data); setIsSupplierModalOpen(true); };
+    const handleOpenCategoryManager = (type: 'purchase' | 'expense') => {
+        setCategoryManagerType(type);
+        setIsCategoryModalOpen(true);
+    };
+
+    if (isMobileScanner) {
+        return <MobileScannerView />;
+    }
 
     return (
         <div className="container">
@@ -257,10 +341,15 @@ export const App: React.FC = () => {
                 <div className="header-left"><h1><i className="fa-solid fa-cube"></i> ERP Inventario</h1>
                     <div className="nav-tabs">
                         <button className={`nav-tab ${currentTab === 'products' ? 'active' : ''}`} onClick={() => setCurrentTab('products')}>Inventario</button>
+                        <button className={`nav-tab ${currentTab === 'marketplace' ? 'active' : ''}`} onClick={() => setCurrentTab('marketplace')} style={{color: currentTab === 'marketplace' ? '#0891b2' : ''}}>Marketplace</button>
+                        <button className={`nav-tab ${currentTab === 'pos' ? 'active' : ''}`} onClick={() => setCurrentTab('pos')} style={{color: currentTab === 'pos' ? '#f59e0b' : ''}}><i className="fa-solid fa-cash-register"></i> Caja (POS)</button>
                         <button className={`nav-tab ${currentTab === 'suppliers' ? 'active' : ''}`} onClick={() => setCurrentTab('suppliers')}>Proveedores</button>
+                        <button className={`nav-tab ${currentTab === 'prices' ? 'active' : ''}`} onClick={() => setCurrentTab('prices')}>Precios</button>
                         <button className={`nav-tab ${currentTab === 'purchases' ? 'active' : ''}`} onClick={() => setCurrentTab('purchases')}>Compras</button>
                         <button className={`nav-tab ${currentTab === 'sales' ? 'active' : ''}`} onClick={() => setCurrentTab('sales')}>Ventas</button>
+                        <button className={`nav-tab ${currentTab === 'expenses' ? 'active' : ''}`} onClick={() => setCurrentTab('expenses')}>Gastos</button>
                         <button className={`nav-tab ${currentTab === 'coupons' ? 'active' : ''}`} onClick={() => setCurrentTab('coupons')}>Cupones</button>
+                        <button className={`nav-tab ${currentTab === 'financials' ? 'active' : ''}`} onClick={() => setCurrentTab('financials')}>Resultados</button>
                     </div>
                 </div>
                 <div className="header-actions">
@@ -281,6 +370,7 @@ export const App: React.FC = () => {
                      currentTab === 'suppliers' ? <button className="btn btn-primary" onClick={() => handleOpenSupplier()}><i className="fa-solid fa-plus"></i> Nuevo Proveedor</button> : 
                      currentTab === 'purchases' ? <button className="btn btn-primary" onClick={() => setIsPurchaseModalOpen(true)}><i className="fa-solid fa-cart-plus"></i> Registrar Compra</button> :
                      currentTab === 'sales' ? <button className="btn btn-primary" onClick={() => setIsSaleModalOpen(true)}><i className="fa-solid fa-cash-register"></i> Registrar Venta</button> :
+                     currentTab === 'expenses' ? <button className="btn btn-primary" onClick={() => setIsExpenseModalOpen(true)}><i className="fa-solid fa-file-invoice-dollar"></i> Registrar Gasto</button> :
                      currentTab === 'coupons' ? <button className="btn btn-primary" onClick={() => handleOpenCoupon()}><i className="fa-solid fa-plus"></i> Nuevo Cupón</button> : null}
                 </div>
             </header>
@@ -290,20 +380,45 @@ export const App: React.FC = () => {
                         ? (products.length === 0 ? <EmptyState type="productos" onCreate={() => handleOpenProduct()} /> : <div className="product-grid">{products.map(p => <ProductCard key={p.id} product={p} onClick={handleOpenProduct} />)}</div>)
                         : (products.length === 0 ? <EmptyState type="productos" onCreate={() => handleOpenProduct()} /> : <ProductTable products={products} onClick={handleOpenProduct} />)
                 )}
+                
+                {/* Marketplace Tab */}
+                {currentTab === 'marketplace' && (
+                    <MarketplaceView 
+                        products={products} 
+                        onProductClick={(p) => setSelectedMarketplaceProduct(p)} 
+                        cartCount={cartItems.reduce((acc, item) => acc + item.quantity, 0)}
+                        onOpenCart={() => setIsCartOpen(true)}
+                    />
+                )}
+
+                {/* Point of Sale (Caja) Tab */}
+                {currentTab === 'pos' && (
+                    <PointOfSaleView 
+                        products={products}
+                        onSaleSuccess={fetchData}
+                    />
+                )}
+
                 {currentTab === 'suppliers' && (
                     suppliersView === 'grid' 
                         ? (suppliers.length === 0 ? <EmptyState type="proveedores" onCreate={() => handleOpenSupplier()} /> : <div className="product-grid">{suppliers.map(s => <SupplierCard key={s.id} supplier={s} onClick={handleOpenSupplier} />)}</div>)
                         : (suppliers.length === 0 ? <EmptyState type="proveedores" onCreate={() => handleOpenSupplier()} /> : <SupplierTable suppliers={suppliers} onClick={handleOpenSupplier} />)
                 )}
+                {currentTab === 'prices' && (
+                    <PriceDetermination products={products} batches={batches} sales={sales} expenses={expenses} onUpdate={fetchData} />
+                )}
+                {currentTab === 'financials' && (
+                    <FinancialAnalysis sales={sales} expenses={expenses} batches={batches} products={products} />
+                )}
                 {currentTab === 'purchases' && (
                     batches.length === 0 ? <EmptyState type="compras" onCreate={() => setIsPurchaseModalOpen(true)} /> :
                     <div className="table-container">
                         <table className="product-table">
-                            <thead><tr><th>ID</th><th>Producto</th><th>Proveedor</th><th>Factura</th><th>Fecha</th><th>Cant.</th><th>Costo</th></tr></thead>
+                            <thead><tr><th>ID</th><th>Producto</th><th>Proveedor</th><th>Factura</th><th>Fecha</th><th>Categoría</th><th>Cant.</th><th>Costo</th></tr></thead>
                             <tbody>
                                 {batches.map(b => (
                                     <tr key={b.id}>
-                                        <td>L-{b.batch_code}</td><td>{b.products?.name}</td><td>{b.suppliers?.name}</td><td>{b.invoice_number}</td><td>{formatDate(b.purchase_date)}</td><td>{b.quantity}</td><td>{formatCurrency(b.unit_cost)}</td>
+                                        <td>L-{b.batch_code}</td><td>{b.products?.name}</td><td>{b.suppliers?.name}</td><td>{b.invoice_number}</td><td>{formatDate(b.purchase_date)}</td><td>{b.purchase_categories?.name || '-'}</td><td>{b.quantity}</td><td>{formatCurrency(b.unit_cost)}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -356,16 +471,42 @@ export const App: React.FC = () => {
                         </table>
                     </div>
                 )}
+                 {currentTab === 'expenses' && (
+                    expenses.length === 0 ? <EmptyState type="gastos" onCreate={() => setIsExpenseModalOpen(true)} /> :
+                    <ExpenseTable expenses={expenses} />
+                )}
                  {currentTab === 'coupons' && (
                     coupons.length === 0 ? <EmptyState type="cupones" onCreate={() => handleOpenCoupon()} /> :
                     <CouponTable coupons={coupons} onClick={handleOpenCoupon} />
                 )}
             </main>
-            {isProductModalOpen && <ProductManagementModal onClose={() => setIsProductModalOpen(false)} onSuccess={fetchData} productToEdit={editingProduct} initialData={initialProductData} suppliers={suppliers} isStacked={isPurchaseModalOpen} />}
-            {isSupplierModalOpen && <SupplierManagementModal onClose={() => setIsSupplierModalOpen(false)} onSuccess={fetchData} supplierToEdit={editingSupplier} initialData={initialSupplierData} isStacked={isPurchaseModalOpen} />}
-            {isPurchaseModalOpen && <PurchaseModal onClose={() => setIsPurchaseModalOpen(false)} onSuccess={fetchData} products={products} suppliers={suppliers} onOpenProductCreate={handleOpenProductFromAgent} onOpenSupplierCreate={handleOpenSupplierFromAgent} />}
+            {isProductModalOpen && <ProductManagementModal onClose={() => setIsProductModalOpen(false)} onSuccess={fetchData} productToEdit={editingProduct} initialData={initialProductData} suppliers={suppliers} isStacked={isPurchaseModalOpen || isExpenseModalOpen} />}
+            {isSupplierModalOpen && <SupplierManagementModal onClose={() => setIsSupplierModalOpen(false)} onSuccess={fetchData} supplierToEdit={editingSupplier} initialData={initialSupplierData} isStacked={isPurchaseModalOpen || isExpenseModalOpen} />}
+            {isPurchaseModalOpen && <PurchaseModal onClose={() => setIsPurchaseModalOpen(false)} onSuccess={fetchData} products={products} suppliers={suppliers} onOpenProductCreate={handleOpenProductFromAgent} onOpenSupplierCreate={handleOpenSupplierFromAgent} categories={purchaseCategories} onOpenCategoryManager={() => handleOpenCategoryManager('purchase')} />}
             {isSaleModalOpen && <SaleModal onClose={() => setIsSaleModalOpen(false)} onSuccess={fetchData} products={products} coupons={coupons} />}
             {isCouponModalOpen && <CouponManagementModal onClose={() => setIsCouponModalOpen(false)} onSuccess={fetchData} couponToEdit={editingCoupon} products={products} />}
+            {isExpenseModalOpen && <ExpenseModal onClose={() => setIsExpenseModalOpen(false)} onSuccess={fetchData} suppliers={suppliers} onOpenSupplierCreate={handleOpenSupplierFromAgent} categories={expenseCategories} onOpenCategoryManager={() => handleOpenCategoryManager('expense')} />}
+            {isCategoryModalOpen && categoryManagerType && <CategoryManagementModal onClose={() => setIsCategoryModalOpen(false)} onSuccess={fetchData} categories={categoryManagerType === 'purchase' ? purchaseCategories : expenseCategories} categoryType={categoryManagerType} />}
+            
+            {/* Marketplace Modal */}
+            {selectedMarketplaceProduct && (
+                <MarketplaceDetailModal 
+                    onClose={() => setSelectedMarketplaceProduct(null)} 
+                    product={selectedMarketplaceProduct} 
+                    onAddToCart={() => handleAddToCart(selectedMarketplaceProduct)}
+                />
+            )}
+
+            {/* Cart Modal */}
+            {isCartOpen && (
+                <MarketplaceCartModal 
+                    items={cartItems}
+                    onClose={() => setIsCartOpen(false)}
+                    onUpdateQuantity={handleUpdateCartQuantity}
+                    onRemove={handleRemoveFromCart}
+                    onClear={handleClearCart}
+                />
+            )}
         </div>
     );
 };
@@ -374,9 +515,15 @@ const EmptyState: React.FC<{ type: string; onCreate: () => void }> = ({ type, on
     <div className="empty-state">
         <i className="fa-solid fa-box-open" style={{fontSize: '3rem', color: 'var(--text-muted)', marginBottom: '1rem'}}></i>
         <h2>No hay {type} registrados aún.</h2>
-        <p>¡Es un buen momento para añadir el primer {type === 'compras' || type === 'ventas' ? 'registro' : type.slice(0, -1)}!</p>
+        <p>¡Es un buen momento para añadir el primer {type === 'compras' || type === 'ventas' || type === 'gastos' ? 'registro' : type.slice(0, -1)}!</p>
         <button className="btn btn-primary" onClick={onCreate} style={{marginTop: '1.5rem'}}>
-            <i className="fa-solid fa-plus"></i> Añadir {type === 'compras' ? 'Compra' : (type === 'ventas' ? 'Venta' : (type === 'cupones' ? 'Cupón' : type.slice(0, -1).charAt(0).toUpperCase() + type.slice(0, -1).slice(1)))}
+            <i className="fa-solid fa-plus"></i> Añadir {
+                type === 'compras' ? 'Compra' : 
+                type === 'ventas' ? 'Venta' : 
+                type === 'cupones' ? 'Cupón' : 
+                type === 'gastos' ? 'Gasto' : 
+                type.slice(0, -1).charAt(0).toUpperCase() + type.slice(0, -1).slice(1)
+            }
         </button>
     </div>
 );
