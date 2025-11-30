@@ -22,9 +22,13 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ products, onPr
 
     // Función auxiliar para obtener ID (Usuario real o Invitado)
     const getOrCreateUserId = async () => {
-        // 1. Intentar obtener usuario autenticado
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) return user.id;
+        try {
+            // 1. Intentar obtener usuario autenticado
+            const { data } = await supabase.auth.getUser();
+            if (data?.user) return data.user.id;
+        } catch (e) {
+            console.warn("Error verificando sesión:", e);
+        }
 
         // 2. Si no hay, usar/generar ID de invitado en localStorage
         let guestId = localStorage.getItem('marketplace_guest_id');
@@ -69,8 +73,13 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ products, onPr
                 myLikes?.forEach((like: any) => myFavs.add(like.product_id));
                 setFavorites(myFavs);
 
-            } catch (error) {
-                console.error("Error al cargar likes:", error);
+            } catch (error: any) {
+                // Handle specific Supabase errors gracefully
+                if (error?.code === '42P01') {
+                    console.warn("Tabla 'product_likes' no existe en Supabase. La funcionalidad de likes está deshabilitada.");
+                } else {
+                    console.error("Error al cargar likes:", error?.message || error);
+                }
             } finally {
                 setIsLoadingLikes(false);
             }
@@ -117,15 +126,25 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ products, onPr
 
         try {
             // 2. Llamada a Base de Datos (Función: toggle_product_like)
+            // Si la función RPC no existe, intentamos fallback manual (insert/delete)
             const { data: isLikedDB, error } = await supabase.rpc('toggle_product_like', {
                 p_product_id: productId,
                 p_user_id: userIdToUse 
             });
 
-            if (error) throw error;
-
-            // 3. Verificación de Integridad
-            if (isLikedDB !== newIsLiked) {
+            if (error) {
+                // Fallback manual si RPC no existe
+                if (error.code === '42883') { // Undefined function
+                     if (newIsLiked) {
+                         await supabase.from('product_likes').insert({ product_id: productId, user_id: userIdToUse });
+                     } else {
+                         await supabase.from('product_likes').delete().eq('product_id', productId).eq('user_id', userIdToUse);
+                     }
+                } else {
+                    throw error;
+                }
+            } else if (typeof isLikedDB === 'boolean' && isLikedDB !== newIsLiked) {
+                 // 3. Verificación de Integridad (solo si RPC funcionó y devolvió boolean)
                 console.warn("Sincronizando estado de like con servidor...");
                 const correctedFavs = new Set(newFavorites);
                 if (isLikedDB) correctedFavs.add(productId);
@@ -139,7 +158,7 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ products, onPr
             }
 
         } catch (error: any) {
-            console.error("Error al actualizar like:", error);
+            console.error("Error al actualizar like:", error.message || error);
             // Rollback
             const rollbackFavs = new Set(favorites);
             if (wasLiked) rollbackFavs.add(productId);
@@ -147,7 +166,9 @@ export const MarketplaceView: React.FC<MarketplaceViewProps> = ({ products, onPr
             setFavorites(rollbackFavs);
             setLikeCounts(prev => ({ ...prev, [productId]: prevCount }));
             
-            alert(`Error al guardar tu voto: ${error.message || 'Intenta nuevamente.'}`);
+            if (error?.code === '42P01') {
+                alert("La funcionalidad de Likes requiere configuración en la base de datos (tabla 'product_likes').");
+            }
         }
     };
 

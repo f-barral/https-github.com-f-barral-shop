@@ -20,17 +20,26 @@ export const MarketplaceDetailModal: React.FC<MarketplaceDetailModalProps> = ({ 
     // Check initial like status
     useEffect(() => {
         const checkLike = async () => {
-            let userId = (await supabase.auth.getUser()).data.user?.id;
-            if (!userId) userId = localStorage.getItem('marketplace_guest_id') || '';
-            
-            if (userId) {
-                const { data } = await supabase
-                    .from('product_likes')
-                    .select('product_id')
-                    .eq('product_id', product.id)
-                    .eq('user_id', userId)
-                    .maybeSingle();
-                if (data) setIsLiked(true);
+            try {
+                let userId = (await supabase.auth.getUser()).data.user?.id;
+                if (!userId) userId = localStorage.getItem('marketplace_guest_id') || '';
+                
+                if (userId) {
+                    const { data, error } = await supabase
+                        .from('product_likes')
+                        .select('product_id')
+                        .eq('product_id', product.id)
+                        .eq('user_id', userId)
+                        .maybeSingle();
+                    
+                    if (error) {
+                        if (error.code !== '42P01') console.error("Error checkLike:", error.message);
+                        return;
+                    }
+                    if (data) setIsLiked(true);
+                }
+            } catch (e) {
+                console.warn("Auth/DB check error", e);
             }
         };
         checkLike();
@@ -46,14 +55,30 @@ export const MarketplaceDetailModal: React.FC<MarketplaceDetailModalProps> = ({ 
             localStorage.setItem('marketplace_guest_id', userId);
         }
 
-        const { error } = await supabase.rpc('toggle_product_like', {
-            p_product_id: product.id,
-            p_user_id: userId
-        });
+        try {
+            const { error } = await supabase.rpc('toggle_product_like', {
+                p_product_id: product.id,
+                p_user_id: userId
+            });
 
-        if (error) {
-            console.error(error);
+            if (error) {
+                if (error.code === '42883') { // Function undefined, fallback
+                    if (!prev) {
+                        await supabase.from('product_likes').insert({ product_id: product.id, user_id: userId });
+                    } else {
+                        await supabase.from('product_likes').delete().eq('product_id', product.id).eq('user_id', userId);
+                    }
+                } else {
+                     throw error;
+                }
+            }
+        } catch (error: any) {
+            console.error("Error toggle like:", error.message || error);
             setIsLiked(prev); // Rollback if error
+             if (error?.code === '42P01') {
+                // Table missing, silent fail in UI but log warn
+                console.warn("Table product_likes missing");
+            }
         }
     };
 
