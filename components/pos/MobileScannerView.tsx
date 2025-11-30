@@ -16,6 +16,10 @@ export const MobileScannerView: React.FC = () => {
     const [scanStatus, setScanStatus] = useState<'scanning' | 'sending' | 'success'>('scanning');
     const [isChannelReady, setIsChannelReady] = useState(false);
     
+    // Manual Input State
+    const [showManualInput, setShowManualInput] = useState(false);
+    const [manualCode, setManualCode] = useState('');
+    
     // Refs
     const scannerRef = useRef<Html5Qrcode | null>(null);
     const channelRef = useRef<RealtimeChannel | null>(null);
@@ -196,6 +200,7 @@ export const MobileScannerView: React.FC = () => {
         
         setScanStatus('sending');
         setLastScanned(decodedText);
+        setShowManualInput(false); // Close manual if open
 
         if (navigator.vibrate) navigator.vibrate(200);
 
@@ -234,6 +239,14 @@ export const MobileScannerView: React.FC = () => {
             return;
         }
         onScanSuccess('CONNECTION_TEST');
+    };
+
+    const handleManualSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if(manualCode) {
+            onScanSuccess(manualCode);
+            setManualCode('');
+        }
     };
 
     // --- RENDER STATES ---
@@ -329,20 +342,76 @@ export const MobileScannerView: React.FC = () => {
                     <div style={{position: 'absolute', bottom: '-2px', right: '-2px', width: '20px', height: '20px', borderBottom: '4px solid #49FFF5', borderRight: '4px solid #49FFF5', borderRadius: '0 0 4px 0'}}></div>
                 </div>
 
-                {/* Manual Test Button */}
-                <button 
-                    onClick={sendTestScan}
-                    style={{
-                        position: 'absolute', bottom: '20px', right: '20px',
-                        background: isChannelReady ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255,255,255,0.2)', 
-                        color: 'white',
-                        border: isChannelReady ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.4)', 
-                        borderRadius: '99px',
-                        padding: '0.5rem 1rem', fontSize: '0.8rem', pointerEvents: 'auto', zIndex: 30
-                    }}
-                >
-                    Prueba
-                </button>
+                {/* Control Buttons Container */}
+                <div style={{
+                    position: 'absolute', bottom: '20px', left: '0', right: '0', 
+                    display: 'flex', justifyContent: 'center', gap: '1rem',
+                    zIndex: 30, pointerEvents: 'auto'
+                }}>
+                    {/* Manual Input Button */}
+                    <button 
+                        onClick={() => setShowManualInput(!showManualInput)}
+                        style={{
+                            background: 'rgba(255,255,255,0.9)', 
+                            color: '#0f172a',
+                            border: 'none',
+                            borderRadius: '99px',
+                            height: '48px',
+                            padding: '0 1.5rem', 
+                            fontSize: '0.9rem', 
+                            fontWeight: 600,
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
+                            display: 'flex', alignItems: 'center', gap: '0.5rem'
+                        }}
+                    >
+                        <i className="fa-solid fa-keyboard"></i> Teclado
+                    </button>
+
+                    {/* Test Button */}
+                    <button 
+                        onClick={sendTestScan}
+                        style={{
+                            background: 'rgba(0,0,0,0.6)', 
+                            color: 'white',
+                            border: '1px solid rgba(255,255,255,0.3)', 
+                            borderRadius: '99px',
+                            height: '48px',
+                            padding: '0 1rem', 
+                            fontSize: '0.9rem', 
+                            fontWeight: 500,
+                            backdropFilter: 'blur(4px)'
+                        }}
+                    >
+                        Test Conexión
+                    </button>
+                </div>
+
+                {/* Manual Input Overlay */}
+                {showManualInput && (
+                    <div style={{
+                        position: 'absolute', bottom: '90px', left: '20px', right: '20px',
+                        background: 'white', borderRadius: '1rem', padding: '1rem',
+                        boxShadow: '0 -5px 20px rgba(0,0,0,0.3)', zIndex: 40,
+                        animation: 'slideUp 0.2s'
+                    }}>
+                        <form onSubmit={handleManualSubmit} style={{display: 'flex', gap: '0.5rem'}}>
+                            <input 
+                                type="text" 
+                                autoFocus
+                                placeholder="Cód. Material / ID"
+                                value={manualCode}
+                                onChange={e => setManualCode(e.target.value)}
+                                style={{
+                                    flex: 1, padding: '0.8rem', borderRadius: '0.5rem', 
+                                    border: '1px solid #cbd5e1', fontSize: '1rem', outline: 'none'
+                                }}
+                            />
+                            <button type="submit" className="btn btn-primary" style={{padding: '0 1.25rem'}}>
+                                Enviar
+                            </button>
+                        </form>
+                    </div>
+                )}
             </div>
 
             {/* Success Feedback Overlay */}
@@ -357,13 +426,17 @@ export const MobileScannerView: React.FC = () => {
                         <i className="fa-solid fa-check" style={{ fontSize: '4rem', color: '#10b981' }}></i>
                     </div>
                     <h3 style={{fontSize: '2rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em'}}>¡Enviado!</h3>
-                    <p style={{marginTop: '1rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '1.2rem'}}>{lastScanned === 'CONNECTION_TEST' ? 'PRUEBA' : lastScanned}</p>
+                    <p style={{marginTop: '1rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '1.2rem'}}>{lastScanned === 'CONNECTION_TEST' ? 'PRUEBA OK' : lastScanned}</p>
                 </div>
             )}
 
             <div style={{ padding: '1.5rem', background: '#0f172a', color: '#94a3b8', textAlign: 'center', fontSize: '0.9rem' }}>
                 Apunta al código QR del producto
             </div>
+            
+            <style>{`
+                @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+            `}</style>
         </div>
     );
 };
