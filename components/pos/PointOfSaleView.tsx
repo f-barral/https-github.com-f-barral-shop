@@ -139,13 +139,15 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
             // Add to specific cart or active cart (Ref-safe)
             const resolvedCartId = addToCartWithRef(product, quantity, targetCartId);
             
-            // Notification logic
-            const { carts } = stateRef.current;
-            const targetCartName = carts.find(c => c.id === resolvedCartId)?.name || 'Carrito Activo';
-            
-            showNotification('success', 'Producto Recibido', `${product.name} (x${quantity}) → ${targetCartName}`);
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); // Success beep
-            audio.play().catch(() => {});
+            if (resolvedCartId) {
+                // Notification logic
+                const { carts } = stateRef.current;
+                const targetCartName = carts.find(c => c.id === resolvedCartId)?.name || 'Carrito Activo';
+                
+                showNotification('success', 'Producto Recibido', `${product.name} (x${quantity}) → ${targetCartName}`);
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); // Success beep
+                audio.play().catch(() => {});
+            }
         } else {
             showNotification('error', 'Producto No Encontrado', `Código: ${code}`);
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3'); // Error beep
@@ -195,13 +197,28 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     const addToCartWithRef = (product: Product, quantity = 1, targetCartId?: string | null) => {
         const { activeCartId: currentActiveId, carts: currentCarts } = stateRef.current;
         
-        // Use targetCartId if provided and valid string, otherwise activeCartId, otherwise first cart
-        const destCartId = (targetCartId && targetCartId.trim() !== "") 
-            ? targetCartId 
-            : (currentActiveId || (currentCarts.length > 0 ? currentCarts[0].id : null));
+        // 1. Determine Effective Destination Cart
+        let destCartId = currentActiveId; // Default to active
+
+        if (targetCartId && targetCartId.trim() !== "") {
+            // Check if the requested cart actually exists
+            const exists = currentCarts.some(c => c.id === targetCartId);
+            if (exists) {
+                destCartId = targetCartId;
+            } else {
+                console.warn(`Remote scan requested cart ${targetCartId} which does not exist. Falling back to active cart.`);
+                // destCartId remains currentActiveId
+            }
+        }
+
+        // 2. Final Fallback if no active cart set
+        if (!destCartId && currentCarts.length > 0) {
+            destCartId = currentCarts[0].id;
+        }
         
         if (!destCartId) return null;
 
+        // 3. Update State
         setCarts(prev => {
             return prev.map(cart => {
                 if (cart.id === destCartId) {
