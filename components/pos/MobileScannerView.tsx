@@ -136,7 +136,6 @@ export const MobileScannerView: React.FC = () => {
             const html5QrCode = new Html5Qrcode("mobile-reader");
             scannerRef.current = html5QrCode;
 
-            // Calculamos un QR box responsivo
             const qrboxFunction = (viewfinderWidth: number, viewfinderHeight: number) => {
                 const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
                 return {
@@ -150,8 +149,6 @@ export const MobileScannerView: React.FC = () => {
                 {
                     fps: 10,
                     qrbox: qrboxFunction,
-                    // No seteamos aspectRatio fijo para que tome el del dispositivo
-                    // Solicitamos mayor resolución para mejorar la lectura
                     videoConstraints: {
                         facingMode: "environment",
                         width: { min: 640, ideal: 1280, max: 1920 },
@@ -168,7 +165,6 @@ export const MobileScannerView: React.FC = () => {
             );
         } catch (err) {
             console.error("Error starting scanner", err);
-            // Intentar fallback básico si falla la config avanzada
             try {
                 if(scannerRef.current) {
                     await scannerRef.current.start(
@@ -203,10 +199,6 @@ export const MobileScannerView: React.FC = () => {
 
         if (navigator.vibrate) navigator.vibrate(200);
 
-        // Sound Feedback
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3');
-        audio.play().catch(() => {});
-
         try {
             const payload = { code: decodedText, device: device?.name || 'Móvil' };
             
@@ -218,7 +210,7 @@ export const MobileScannerView: React.FC = () => {
                 });
                 setScanStatus('success');
             } else {
-                alert("Error: No hay conexión con la caja central.");
+                alert("Error: No hay conexión con la caja central. Refresca la página.");
                 setScanStatus('scanning');
             }
             
@@ -237,7 +229,11 @@ export const MobileScannerView: React.FC = () => {
     };
 
     const sendTestScan = () => {
-        onScanSuccess(`TEST-${Math.floor(Math.random() * 1000)}`);
+        if (!isChannelReady) {
+            alert("Todavía no hay conexión con el servidor. Espera a que diga 'Listo'.");
+            return;
+        }
+        onScanSuccess('CONNECTION_TEST');
     };
 
     // --- RENDER STATES ---
@@ -293,7 +289,7 @@ export const MobileScannerView: React.FC = () => {
 
     return (
         <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'black', position: 'relative' }}>
-            {/* FORCE VIDEO TO FILL SCREEN - Critical Fix */}
+            {/* FORCE VIDEO TO FILL SCREEN */}
             <style>{`
                 #mobile-reader video {
                     width: 100% !important;
@@ -333,13 +329,15 @@ export const MobileScannerView: React.FC = () => {
                     <div style={{position: 'absolute', bottom: '-2px', right: '-2px', width: '20px', height: '20px', borderBottom: '4px solid #49FFF5', borderRight: '4px solid #49FFF5', borderRadius: '0 0 4px 0'}}></div>
                 </div>
 
-                {/* Manual Test Button (Hidden but accessible) */}
+                {/* Manual Test Button */}
                 <button 
                     onClick={sendTestScan}
                     style={{
                         position: 'absolute', bottom: '20px', right: '20px',
-                        background: 'rgba(255,255,255,0.2)', color: 'white',
-                        border: '1px solid rgba(255,255,255,0.4)', borderRadius: '99px',
+                        background: isChannelReady ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255,255,255,0.2)', 
+                        color: 'white',
+                        border: isChannelReady ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.4)', 
+                        borderRadius: '99px',
                         padding: '0.5rem 1rem', fontSize: '0.8rem', pointerEvents: 'auto', zIndex: 30
                     }}
                 >
@@ -359,7 +357,7 @@ export const MobileScannerView: React.FC = () => {
                         <i className="fa-solid fa-check" style={{ fontSize: '4rem', color: '#10b981' }}></i>
                     </div>
                     <h3 style={{fontSize: '2rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em'}}>¡Enviado!</h3>
-                    <p style={{marginTop: '1rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '1.2rem'}}>{lastScanned}</p>
+                    <p style={{marginTop: '1rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '1.2rem'}}>{lastScanned === 'CONNECTION_TEST' ? 'PRUEBA' : lastScanned}</p>
                 </div>
             )}
 

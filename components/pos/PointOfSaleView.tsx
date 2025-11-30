@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Product, ActiveCart, CartItem } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
@@ -11,6 +11,13 @@ interface PointOfSaleViewProps {
     onSaleSuccess: () => void;
 }
 
+interface ScanNotification {
+    id: string;
+    type: 'success' | 'error' | 'info';
+    title: string;
+    message: string;
+}
+
 export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSaleSuccess }) => {
     const [carts, setCarts] = useState<ActiveCart[]>([]);
     const [activeCartId, setActiveCartId] = useState<string | null>(null);
@@ -19,11 +26,24 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     const [searchTerm, setSearchTerm] = useState('');
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [lastRemoteScan, setLastRemoteScan] = useState<{ code: string, device: string } | null>(null);
+    
+    // Notification State
+    const [notification, setNotification] = useState<ScanNotification | null>(null);
+
+    // Refs for stable access inside subscriptions without re-running effects
+    const stateRef = useRef({
+        products,
+        activeCartId,
+        carts
+    });
+
+    // Keep refs synced with state
+    useEffect(() => {
+        stateRef.current = { products, activeCartId, carts };
+    }, [products, activeCartId, carts]);
 
     // Initial Cart Load
     useEffect(() => {
-        // Load from local storage or create default
         const stored = localStorage.getItem('pos_carts');
         if (stored) {
             try {
@@ -45,22 +65,61 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         }
     }, [carts]);
 
-    // Realtime Scanner Listener
+    // Realtime Scanner Listener - STABLE CONNECTION (Run Once)
     useEffect(() => {
+        console.log("Suscribiendo a canal POS...");
         const channel = supabase.channel('pos-scans')
             .on('broadcast', { event: 'remote-scan' }, (payload) => {
                 if (payload.payload && payload.payload.code) {
-                    handleScan(payload.payload.code, true);
-                    setLastRemoteScan({ code: payload.payload.code, device: payload.payload.device });
-                    setTimeout(() => setLastRemoteScan(null), 3000);
+                    handleRemoteScanReceived(payload.payload.code, payload.payload.device);
                 }
             })
-            .subscribe();
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') console.log("POS conectado a escáneres remotos");
+            });
 
         return () => {
+            console.log("Desconectando canal POS...");
             supabase.removeChannel(channel);
         };
-    }, [products, activeCartId, carts]); // Re-bind when cart state changes to ensure correct active cart
+    }, []);
+
+    const handleRemoteScanReceived = (code: string, deviceName: string) => {
+        // Special Test Code
+        if (code === 'CONNECTION_TEST') {
+            showNotification('info', 'Conexión Exitosa', `Dispositivo "${deviceName}" conectado correctamente.`);
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+            audio.play().catch(() => {});
+            return;
+        }
+
+        const { products: currentProducts } = stateRef.current;
+        
+        let product = currentProducts.find(p => p.id === code);
+        if (!product) {
+            const numericCode = parseInt(code);
+            if (!isNaN(numericCode)) {
+                product = currentProducts.find(p => p.material_code === numericCode);
+            }
+        }
+
+        if (product) {
+            // Add to cart using the stable ref to find active cart ID
+            addToCartWithRef(product);
+            showNotification('success', 'Producto Agregado', `${product.name} (x1)`);
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); // Success beep
+            audio.play().catch(() => {});
+        } else {
+            showNotification('error', 'Producto No Encontrado', `Código: ${code}`);
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3'); // Error beep
+            audio.play().catch(() => {});
+        }
+    };
+
+    const showNotification = (type: 'success' | 'error' | 'info', title: string, message: string) => {
+        setNotification({ id: Date.now().toString(), type, title, message });
+        setTimeout(() => setNotification(null), 4000);
+    };
 
     const createCart = (nameInput?: string) => {
         const name = nameInput || prompt("Nombre del cliente / mesa:");
@@ -94,14 +153,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         setCarts(prev => prev.map(c => c.id === cartId ? { ...c, items: newItems } : c));
     };
 
-    const addToCart = (product: Product, quantity = 1) => {
-        if (!activeCartId) return;
-        // Need to find the cart again from state to be sure we have latest items (due to closure)
-        // But since we pass setCarts functional update, we need logic inside.
-        
+    // Helper to add to cart using Ref state (for remote calls)
+    const addToCartWithRef = (product: Product, quantity = 1) => {
+        const { activeCartId: currentCartId } = stateRef.current;
+        if (!currentCartId) return;
+
         setCarts(prev => {
             return prev.map(cart => {
-                if (cart.id === activeCartId) {
+                if (cart.id === currentCartId) {
                     const currentItems = cart.items || [];
                     const existing = currentItems.find(i => i.productId === product.id);
                     
@@ -124,9 +183,14 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         });
     };
 
-    const handleScan = (decodedText: string, isRemote = false) => {
+    // Standard add to cart (UI triggered)
+    const addToCart = (product: Product, quantity = 1) => {
+        if (!activeCartId) return;
+        addToCartWithRef(product, quantity);
+    };
+
+    const handleLocalScan = (decodedText: string) => {
         let product = products.find(p => p.id === decodedText);
-        
         if (!product) {
             const code = parseInt(decodedText);
             if (!isNaN(code)) {
@@ -136,16 +200,12 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
 
         if (product) {
             addToCart(product);
-            if (!isRemote) {
-                setShowScanner(false);
-                alert(`Producto agregado: ${product.name}`);
-            } else {
-                // Play notification sound for remote scan
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3');
-                audio.play().catch(e => console.log('Audio play failed', e));
-            }
+            setShowScanner(false);
+            showNotification('success', 'Producto Agregado', product.name);
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+            audio.play().catch(() => {});
         } else {
-            if (!isRemote) alert(`Producto no encontrado para el código: ${decodedText}`);
+            alert(`Producto no encontrado para el código: ${decodedText}`);
         }
     };
 
@@ -211,9 +271,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     const total = activeCart?.items.reduce((sum, i) => sum + ((i.unitPrice || 0) * i.quantity), 0) || 0;
 
     return (
-        <div style={{height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column'}}>
+        <div style={{height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', position: 'relative'}}>
             {showScanner && (
-                <QRScanner onScan={(code) => handleScan(code, false)} onClose={() => setShowScanner(false)} />
+                <QRScanner onScan={handleLocalScan} onClose={() => setShowScanner(false)} />
             )}
 
             {showDeviceManager && (
@@ -221,15 +281,19 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
             )}
 
             {/* Notification Toast for Remote Scan */}
-            {lastRemoteScan && (
+            {notification && (
                 <div style={{
                     position: 'fixed', top: '20px', right: '20px', zIndex: 4000,
-                    background: '#10b981', color: 'white', padding: '1rem', borderRadius: '0.5rem',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)', animation: 'slideInRight 0.3s'
+                    background: notification.type === 'success' ? '#10b981' : (notification.type === 'error' ? '#f59e0b' : '#3b82f6'), 
+                    color: 'white', padding: '1rem', borderRadius: '0.5rem',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)', animation: 'slideInRight 0.3s',
+                    maxWidth: '300px'
                 }}>
-                    <div style={{fontWeight: 600}}><i className="fa-solid fa-mobile-screen"></i> Escaneo Remoto</div>
-                    <div style={{fontSize: '0.9rem'}}>Código: {lastRemoteScan.code}</div>
-                    <div style={{fontSize: '0.8rem', opacity: 0.8}}>De: {lastRemoteScan.device}</div>
+                    <div style={{fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                        <i className={`fa-solid ${notification.type === 'success' ? 'fa-circle-check' : (notification.type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-info')}`}></i>
+                        {notification.title}
+                    </div>
+                    <div style={{fontSize: '0.9rem', marginTop: '0.25rem'}}>{notification.message}</div>
                 </div>
             )}
 
