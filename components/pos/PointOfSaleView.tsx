@@ -5,6 +5,7 @@ import { Product, ActiveCart, CartItem } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { QRScanner } from './QRScanner';
 import { DeviceManagerModal } from './DeviceManagerModal';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface PointOfSaleViewProps {
     products: Product[];
@@ -29,6 +30,9 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     
     // Notification State
     const [notification, setNotification] = useState<ScanNotification | null>(null);
+
+    // Channel Reference (Singleton for the component)
+    const channelRef = useRef<RealtimeChannel | null>(null);
 
     // Refs for stable access inside subscriptions without re-running effects
     const stateRef = useRef({
@@ -65,27 +69,24 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         }
     }, [carts]);
 
-    // Broadcast Carts to Mobile Devices whenever carts change
+    // 1. Establish Realtime Connection (Run Once)
     useEffect(() => {
-        const channel = supabase.channel('pos-scans');
+        console.log("Inicializando canal POS (Singleton)...");
         
-        // Broadcast immediately when carts update
-        const payload = { 
-            carts: carts.map(c => ({ id: c.id, name: c.name })) 
-        };
-        
-        channel.send({
-            type: 'broadcast',
-            event: 'cart-sync',
-            payload: payload
-        }).catch(err => console.error("Error syncing carts", err));
+        // Clean up any existing channel to be safe
+        if (channelRef.current) {
+            supabase.removeChannel(channelRef.current);
+        }
 
-    }, [carts]);
+        const channel = supabase.channel('pos-scans', {
+            config: {
+                broadcast: { self: true }
+            }
+        });
 
-    // Realtime Scanner Listener - STABLE CONNECTION (Run Once)
-    useEffect(() => {
-        console.log("Suscribiendo a canal POS...");
-        const channel = supabase.channel('pos-scans')
+        channelRef.current = channel;
+
+        channel
             .on('broadcast', { event: 'remote-scan' }, (payload) => {
                 if (payload.payload && payload.payload.code) {
                     handleRemoteScanReceived(
@@ -97,29 +98,50 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
                 }
             })
             .on('broadcast', { event: 'request-carts' }, () => {
-                // Mobile device requested carts, send current list
                 console.log("Solicitud de carritos recibida");
-                const currentCarts = stateRef.current.carts;
-                channel.send({
-                    type: 'broadcast',
-                    event: 'cart-sync',
-                    payload: { carts: currentCarts.map(c => ({ id: c.id, name: c.name })) }
-                });
+                broadcastCarts(channel);
             })
             .subscribe((status) => {
-                if (status === 'SUBSCRIBED') console.log("POS conectado a escáneres remotos");
+                console.log(`Estado Conexión POS: ${status}`);
+                if (status === 'SUBSCRIBED') {
+                    // Send initial sync
+                    broadcastCarts(channel);
+                }
             });
 
         return () => {
-            console.log("Desconectando canal POS...");
-            supabase.removeChannel(channel);
+            console.log("Desmontando POS View -> Cerrando canal...");
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
         };
     }, []);
+
+    // 2. Broadcast updates when Carts change (using the existing channel)
+    useEffect(() => {
+        if (channelRef.current && carts.length > 0) {
+            // Check if connected before sending to avoid errors
+            const state = channelRef.current.state;
+            if (state === 'joined') {
+                broadcastCarts(channelRef.current);
+            }
+        }
+    }, [carts]);
+
+    const broadcastCarts = (channel: RealtimeChannel) => {
+        const currentCarts = stateRef.current.carts;
+        channel.send({
+            type: 'broadcast',
+            event: 'cart-sync',
+            payload: { carts: currentCarts.map(c => ({ id: c.id, name: c.name })) }
+        }).catch(err => console.error("Error syncing carts", err));
+    };
 
     const handleRemoteScanReceived = (code: string, deviceName: string, quantity: number = 1, targetCartId?: string | null) => {
         // Special Test Code
         if (code === 'CONNECTION_TEST') {
-            showNotification('info', 'Conexión Exitosa', `Dispositivo "${deviceName}" conectado correctamente.`);
+            showNotification('info', 'Conexión Exitosa', `Dispositivo "${deviceName}" conectado.`);
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
             audio.play().catch(() => {});
             return;
@@ -136,21 +158,19 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         }
 
         if (product) {
-            // Add to specific cart or active cart (Ref-safe)
             const resolvedCartId = addToCartWithRef(product, quantity, targetCartId);
             
             if (resolvedCartId) {
-                // Notification logic
                 const { carts } = stateRef.current;
                 const targetCartName = carts.find(c => c.id === resolvedCartId)?.name || 'Carrito Activo';
                 
                 showNotification('success', 'Producto Recibido', `${product.name} (x${quantity}) → ${targetCartName}`);
-                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); // Success beep
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'); 
                 audio.play().catch(() => {});
             }
         } else {
             showNotification('error', 'Producto No Encontrado', `Código: ${code}`);
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3'); // Error beep
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3');
             audio.play().catch(() => {});
         }
     };
@@ -193,32 +213,26 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
     };
 
     // Helper to add to cart using Ref state (for remote calls)
-    // Returns the ID of the cart where items were added
     const addToCartWithRef = (product: Product, quantity = 1, targetCartId?: string | null) => {
         const { activeCartId: currentActiveId, carts: currentCarts } = stateRef.current;
         
-        // 1. Determine Effective Destination Cart
-        let destCartId = currentActiveId; // Default to active
+        let destCartId = currentActiveId; 
 
         if (targetCartId && targetCartId.trim() !== "") {
-            // Check if the requested cart actually exists
             const exists = currentCarts.some(c => c.id === targetCartId);
             if (exists) {
                 destCartId = targetCartId;
             } else {
-                console.warn(`Remote scan requested cart ${targetCartId} which does not exist. Falling back to active cart.`);
-                // destCartId remains currentActiveId
+                console.warn(`Remote scan requested cart ${targetCartId} which does not exist. Fallback to active.`);
             }
         }
 
-        // 2. Final Fallback if no active cart set
         if (!destCartId && currentCarts.length > 0) {
             destCartId = currentCarts[0].id;
         }
         
         if (!destCartId) return null;
 
-        // 3. Update State
         setCarts(prev => {
             return prev.map(cart => {
                 if (cart.id === destCartId) {
@@ -246,7 +260,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
         return destCartId;
     };
 
-    // Standard add to cart (UI triggered)
     const addToCart = (product: Product, quantity = 1) => {
         if (!activeCartId) return;
         addToCartWithRef(product, quantity, activeCartId);
@@ -343,7 +356,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
                 <DeviceManagerModal onClose={() => setShowDeviceManager(false)} />
             )}
 
-            {/* Notification Toast for Remote Scan */}
             {notification && (
                 <div style={{
                     position: 'fixed', top: '20px', right: '20px', zIndex: 4000,
@@ -407,7 +419,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
             {/* Main Content */}
             <div style={{flex: 1, display: 'flex', gap: '1.5rem', overflow: 'hidden', flexDirection: 'column'}}>
                 
-                {/* Search & Scan Bar */}
                 <div style={{display: 'flex', gap: '0.5rem'}}>
                     <button 
                         className="btn btn-primary" 
@@ -451,7 +462,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
                     </div>
                 </div>
 
-                {/* Cart Items List */}
                 <div style={{flex: 1, background: 'white', borderRadius: '1rem', border: '1px solid var(--border-color)', overflowY: 'auto', padding: '0.5rem'}}>
                     {!activeCart || activeCart.items.length === 0 ? (
                         <div style={{height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)'}}>
@@ -498,7 +508,6 @@ export const PointOfSaleView: React.FC<PointOfSaleViewProps> = ({ products, onSa
                     )}
                 </div>
 
-                {/* Footer Totals & Checkout */}
                 <div style={{background: 'var(--surface-color)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid var(--border-color)'}}>
                     <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', fontSize: '1.2rem', fontWeight: 600}}>
                         <span>Total a Pagar</span>

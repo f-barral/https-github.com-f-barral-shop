@@ -97,10 +97,8 @@ export const MobileScannerView: React.FC = () => {
                     
                     // Auto-select logic
                     setSelectedCartId(prev => {
-                        // If we already have a selection and it still exists, keep it
                         const exists = carts.find(c => c.id === prev);
                         if (exists) return prev;
-                        // Otherwise pick the first one
                         return carts.length > 0 ? carts[0].id : '';
                     });
                 }
@@ -109,7 +107,6 @@ export const MobileScannerView: React.FC = () => {
                 console.log("Estado canal móvil:", status);
                 if (status === 'SUBSCRIBED') {
                     setConnectionState('connected');
-                    // Request carts on connection
                     setTimeout(() => {
                         channel.send({ type: 'broadcast', event: 'request-carts', payload: {} });
                     }, 500);
@@ -128,7 +125,6 @@ export const MobileScannerView: React.FC = () => {
     const handleRefreshCarts = () => {
         if (channelRef.current && connectionState === 'connected') {
             channelRef.current.send({ type: 'broadcast', event: 'request-carts', payload: {} });
-            // Feedback visual simple
             const btn = document.getElementById('refresh-btn');
             if(btn) {
                 btn.style.transform = 'rotate(180deg)';
@@ -261,7 +257,6 @@ export const MobileScannerView: React.FC = () => {
         setScanStatus('sending');
 
         try {
-            // Send payload. If selectedCartId is empty string, send null so PC uses active cart.
             const payload = { 
                 code: code, 
                 device: device?.name || 'Móvil',
@@ -269,35 +264,45 @@ export const MobileScannerView: React.FC = () => {
                 cartId: selectedCartId || null 
             };
             
-            // Auto-reconnect check
+            // Auto-reconnect check logic
             if (!channelRef.current || connectionState !== 'connected') {
-                console.log("No conectado, intentando reconectar antes de enviar...");
+                console.warn("Estado desconectado antes de enviar. Reconectando...");
                 await connectToChannel();
-                await new Promise(r => setTimeout(r, 1000));
+                // Wait for connection to stabilize
+                await new Promise(r => setTimeout(r, 1500));
             }
 
             if (channelRef.current) {
-                await channelRef.current.send({
+                // IMPORTANT: Check the response status of send()
+                const resp = await channelRef.current.send({
                     type: 'broadcast',
                     event: 'remote-scan',
                     payload: payload
                 });
-                setScanStatus('success');
+
+                if (resp === 'ok') {
+                    setScanStatus('success');
+                    setTimeout(() => {
+                        setScanStatus('scanning');
+                        setLastScanned(null);
+                        processingRef.current = false;
+                    }, 1500);
+                } else {
+                    throw new Error(`Broadcast failed with status: ${resp}`);
+                }
             } else {
-                throw new Error("No channel");
+                throw new Error("No channel available");
             }
-            
-            setTimeout(() => {
-                setScanStatus('scanning');
-                setLastScanned(null);
-                processingRef.current = false;
-            }, 1500);
 
         } catch (e) {
             console.error("Error sending scan", e);
-            setScanStatus('review'); // Go back to review on error
+            setScanStatus('review'); // Return to review screen
             processingRef.current = false;
-            alert("Error de conexión. Intenta nuevamente.");
+            
+            // Force Hard Reset of connection
+            setConnectionState('disconnected');
+            alert("Error de conexión con la Caja. Intenta 'Enviar' nuevamente.");
+            handleReconnect();
         }
     };
 
