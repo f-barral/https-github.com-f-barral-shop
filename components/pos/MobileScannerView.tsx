@@ -14,7 +14,7 @@ export const MobileScannerView: React.FC = () => {
     // Scan & Connection state
     const [lastScanned, setLastScanned] = useState<string | null>(null);
     const [scanStatus, setScanStatus] = useState<'scanning' | 'sending' | 'success'>('scanning');
-    const [isChannelReady, setIsChannelReady] = useState(false);
+    const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
     
     // Manual Input State
     const [showManualInput, setShowManualInput] = useState(false);
@@ -25,31 +25,18 @@ export const MobileScannerView: React.FC = () => {
     const channelRef = useRef<RealtimeChannel | null>(null);
     const processingRef = useRef<boolean>(false);
 
-    // 1. Init: Check Identity & Connect Channel
+    // 1. Init
     useEffect(() => {
         checkIdentity();
-        
-        // Setup Supabase Channel
-        console.log("Iniciando canal pos-scans en móvil...");
-        const channel = supabase.channel('pos-scans');
-        
-        channel.subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-                console.log("Móvil conectado a pos-scans exitosamente");
-                channelRef.current = channel;
-                setIsChannelReady(true);
-            } else {
-                console.log("Estado canal móvil:", status);
-            }
-        });
+        connectToChannel();
 
         return () => {
-            supabase.removeChannel(channel);
+            cleanupChannel();
             stopScanner();
         };
     }, []);
 
-    // 2. Subscribe to device status changes (Approved/Blocked)
+    // 2. Subscribe to device status changes
     useEffect(() => {
         if (!device) return;
 
@@ -71,12 +58,41 @@ export const MobileScannerView: React.FC = () => {
     // 3. Control Scanner based on Status
     useEffect(() => {
         if (status === 'approved') {
-            // Give a small delay for DOM to be ready
             setTimeout(() => startScanner(), 500);
         } else {
             stopScanner();
         }
     }, [status]);
+
+    const cleanupChannel = async () => {
+        if (channelRef.current) {
+            await supabase.removeChannel(channelRef.current);
+            channelRef.current = null;
+        }
+    };
+
+    const connectToChannel = async () => {
+        setConnectionState('connecting');
+        await cleanupChannel();
+
+        console.log("Iniciando canal pos-scans en móvil...");
+        const channel = supabase.channel('pos-scans');
+        
+        channel.subscribe((status) => {
+            console.log("Estado canal móvil:", status);
+            if (status === 'SUBSCRIBED') {
+                setConnectionState('connected');
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                setConnectionState('disconnected');
+            }
+        });
+
+        channelRef.current = channel;
+    };
+
+    const handleReconnect = () => {
+        connectToChannel();
+    };
 
     const checkIdentity = async () => {
         let deviceId = localStorage.getItem('pos_device_id');
@@ -90,12 +106,10 @@ export const MobileScannerView: React.FC = () => {
             if (data) {
                 setDevice(data as PosDevice);
                 setStatus(data.status);
-                // Keep alive
                 if (data.status === 'approved') {
                     await supabase.from('pos_devices').update({ last_active: new Date().toISOString() }).eq('device_id', deviceId);
                 }
             } else {
-                // ID exists in localstorage but not in DB (deleted?)
                 localStorage.removeItem('pos_device_id');
                 setStatus('register');
             }
@@ -134,7 +148,7 @@ export const MobileScannerView: React.FC = () => {
         const element = document.getElementById("mobile-reader");
         if (!element) return;
         
-        if (scannerRef.current) return; // Already running
+        if (scannerRef.current) return; 
 
         try {
             const html5QrCode = new Html5Qrcode("mobile-reader");
@@ -163,22 +177,10 @@ export const MobileScannerView: React.FC = () => {
                 (decodedText) => {
                     onScanSuccess(decodedText);
                 },
-                (errorMessage) => {
-                    // ignore
-                }
+                (errorMessage) => { }
             );
         } catch (err) {
             console.error("Error starting scanner", err);
-            try {
-                if(scannerRef.current) {
-                    await scannerRef.current.start(
-                        { facingMode: "environment" },
-                        { fps: 10, qrbox: 250 },
-                        (decodedText) => onScanSuccess(decodedText),
-                        () => {}
-                    );
-                }
-            } catch(e) { console.error("Fallback failed", e); }
         }
     };
 
@@ -200,14 +202,22 @@ export const MobileScannerView: React.FC = () => {
         
         setScanStatus('sending');
         setLastScanned(decodedText);
-        setShowManualInput(false); // Close manual if open
+        setShowManualInput(false);
 
         if (navigator.vibrate) navigator.vibrate(200);
 
         try {
             const payload = { code: decodedText, device: device?.name || 'Móvil' };
             
-            if (channelRef.current && isChannelReady) {
+            // Auto-reconnect check
+            if (!channelRef.current || connectionState !== 'connected') {
+                console.log("No conectado, intentando reconectar antes de enviar...");
+                await connectToChannel();
+                // Wait briefly for connection
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            if (channelRef.current) {
                 await channelRef.current.send({
                     type: 'broadcast',
                     event: 'remote-scan',
@@ -215,11 +225,9 @@ export const MobileScannerView: React.FC = () => {
                 });
                 setScanStatus('success');
             } else {
-                alert("Error: No hay conexión con la caja central. Refresca la página.");
-                setScanStatus('scanning');
+                throw new Error("No channel");
             }
             
-            // Cooldown
             setTimeout(() => {
                 setScanStatus('scanning');
                 setLastScanned(null);
@@ -230,14 +238,11 @@ export const MobileScannerView: React.FC = () => {
             console.error("Error sending scan", e);
             setScanStatus('scanning');
             processingRef.current = false;
+            // Removed alert, user sees connection status in UI
         }
     };
 
     const sendTestScan = () => {
-        if (!isChannelReady) {
-            alert("Todavía no hay conexión con el servidor. Espera a que diga 'Listo'.");
-            return;
-        }
         onScanSuccess('CONNECTION_TEST');
     };
 
@@ -249,7 +254,7 @@ export const MobileScannerView: React.FC = () => {
         }
     };
 
-    // --- RENDER STATES ---
+    // --- RENDER ---
 
     if (status === 'register') {
         return (
@@ -302,7 +307,6 @@ export const MobileScannerView: React.FC = () => {
 
     return (
         <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'black', position: 'relative' }}>
-            {/* FORCE VIDEO TO FILL SCREEN */}
             <style>{`
                 #mobile-reader video {
                     width: 100% !important;
@@ -315,20 +319,28 @@ export const MobileScannerView: React.FC = () => {
             {/* Header */}
             <div style={{ padding: '1rem', background: '#0f172a', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '10px', height: '10px', background: isChannelReady ? '#10b981' : '#f59e0b', borderRadius: '50%', boxShadow: isChannelReady ? '0 0 10px #10b981' : 'none' }}></div>
-                    <span style={{ fontWeight: 600 }}>{device?.name}</span>
+                    <div style={{ width: '10px', height: '10px', background: connectionState === 'connected' ? '#10b981' : '#f59e0b', borderRadius: '50%', boxShadow: connectionState === 'connected' ? '0 0 10px #10b981' : 'none' }}></div>
+                    <div style={{display: 'flex', flexDirection: 'column'}}>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{device?.name}</span>
+                        <span style={{ fontSize: '0.7rem', opacity: 0.8, color: connectionState === 'connected' ? '#10b981' : '#f59e0b' }}>
+                            {connectionState === 'connected' ? 'En Línea' : 'Desconectado'}
+                        </span>
+                    </div>
                 </div>
-                <div style={{fontSize: '0.8rem', opacity: 0.8}}>
-                    {scanStatus === 'scanning' ? (isChannelReady ? 'Listo' : 'Conectando...') : 'Enviando...'}
+                <div>
+                     {connectionState === 'disconnected' && (
+                        <button onClick={handleReconnect} className="btn btn-sm" style={{background: '#f59e0b', color: 'white', border: 'none', fontSize: '0.75rem'}}>
+                            Reconectar
+                        </button>
+                    )}
                 </div>
             </div>
 
             {/* Scanner Area */}
             <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#000' }}>
-                 {/* The element for Html5Qrcode to render into */}
                 <div id="mobile-reader" style={{ width: '100%', height: '100%' }}></div>
                 
-                {/* Target Overlay (Visual Guide) */}
+                {/* Target Overlay */}
                 <div style={{
                     position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
                     width: '70vw', height: '70vw', maxWidth: '300px', maxHeight: '300px',
@@ -342,13 +354,12 @@ export const MobileScannerView: React.FC = () => {
                     <div style={{position: 'absolute', bottom: '-2px', right: '-2px', width: '20px', height: '20px', borderBottom: '4px solid #49FFF5', borderRight: '4px solid #49FFF5', borderRadius: '0 0 4px 0'}}></div>
                 </div>
 
-                {/* Control Buttons Container */}
+                {/* Control Buttons */}
                 <div style={{
                     position: 'absolute', bottom: '20px', left: '0', right: '0', 
                     display: 'flex', justifyContent: 'center', gap: '1rem',
                     zIndex: 30, pointerEvents: 'auto'
                 }}>
-                    {/* Manual Input Button */}
                     <button 
                         onClick={() => setShowManualInput(!showManualInput)}
                         style={{
@@ -367,7 +378,6 @@ export const MobileScannerView: React.FC = () => {
                         <i className="fa-solid fa-keyboard"></i> Teclado
                     </button>
 
-                    {/* Test Button */}
                     <button 
                         onClick={sendTestScan}
                         style={{
@@ -427,6 +437,19 @@ export const MobileScannerView: React.FC = () => {
                     </div>
                     <h3 style={{fontSize: '2rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em'}}>¡Enviado!</h3>
                     <p style={{marginTop: '1rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.2)', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '1.2rem'}}>{lastScanned === 'CONNECTION_TEST' ? 'PRUEBA OK' : lastScanned}</p>
+                </div>
+            )}
+            
+            {/* Sending Feedback Overlay */}
+             {scanStatus === 'sending' && (
+                <div style={{ 
+                    position: 'absolute', inset: 0, 
+                    background: 'rgba(0,0,0,0.5)', 
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    color: 'white', zIndex: 50
+                }}>
+                    <div className="loader" style={{borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white'}}></div>
+                    <p style={{marginTop: '1rem'}}>Enviando...</p>
                 </div>
             )}
 
